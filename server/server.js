@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS products (
   stock      INTEGER NOT NULL DEFAULT 10,
   img        TEXT NOT NULL DEFAULT 'assets/img/product-mouse.jpg',
   active     INTEGER NOT NULL DEFAULT 1,
+  reviews    INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS orders (
@@ -60,6 +61,9 @@ CREATE TABLE IF NOT EXISTS orders (
   note          TEXT NOT NULL DEFAULT '',
   items_json    TEXT NOT NULL,
   total         INTEGER NOT NULL CHECK(total >= 0),
+  payment       TEXT NOT NULL DEFAULT 'cod',
+  coupon_code   TEXT NOT NULL DEFAULT '',
+  discount      INTEGER NOT NULL DEFAULT 0,
   status        TEXT NOT NULL DEFAULT 'pending'
                 CHECK(status IN ('pending','confirmed','shipped','delivered','cancelled')),
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -73,11 +77,32 @@ CREATE TABLE IF NOT EXISTS inquiries (
   message    TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS coupons (
+  code       TEXT PRIMARY KEY,
+  type       TEXT NOT NULL DEFAULT 'percent' CHECK(type IN ('percent','flat')),
+  value      INTEGER NOT NULL CHECK(value > 0),
+  min_order  INTEGER NOT NULL DEFAULT 0,
+  active     INTEGER NOT NULL DEFAULT 1,
+  used       INTEGER NOT NULL DEFAULT 0,
+  max_uses   INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS store_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_sessions_user   ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user     ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status   ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created  ON orders(created_at);
 `);
+
+/* ── migrations for databases created before the storefront build ── */
+const _cols = (tbl) => db.prepare(`PRAGMA table_info(${tbl})`).all().map(r => r.name);
+if (!_cols("products").includes("reviews"))   db.exec("ALTER TABLE products ADD COLUMN reviews INTEGER NOT NULL DEFAULT 0");
+if (!_cols("orders").includes("payment"))     db.exec("ALTER TABLE orders ADD COLUMN payment TEXT NOT NULL DEFAULT 'cod'");
+if (!_cols("orders").includes("coupon_code")) db.exec("ALTER TABLE orders ADD COLUMN coupon_code TEXT NOT NULL DEFAULT ''");
+if (!_cols("orders").includes("discount"))    db.exec("ALTER TABLE orders ADD COLUMN discount INTEGER NOT NULL DEFAULT 0");
 
 /* ════════════════ SEED (idempotent) ════════════════ */
 const hashPw = (pw, salt) => crypto.scryptSync(pw, salt, 64).toString("hex");
@@ -99,19 +124,57 @@ if (!db.prepare("SELECT 1 FROM users WHERE email = ?").get("rohit@demo.in")) {
 }
 
 const SEED_PRODUCTS = [
-  ["p1","Ergo Wireless Mouse","2.4GHz + Bluetooth · 3 modes","Tech",499,799,4.6,40,"assets/img/product-mouse.jpg"],
-  ["p2","Luma LED Desk Lamp","3 light tones · USB charge port","Home & Living",899,1299,4.8,32,"assets/img/product-lamp.jpg"],
-  ["p3","USB-C 6-in-1 Hub 100W","4K HDMI · PD 100W · SD reader","Tech",1299,1799,4.5,25,"assets/img/product-hub.jpg"],
-  ["p4","Terra Bluetooth Speaker","12h playtime · TWS pairing","Tech",1499,2199,4.7,18,"assets/img/product-speaker.jpg"],
-  ["p5","Speckled Ceramic Mug","350 ml · handmade · microwave safe","Home & Living",349,499,4.9,60,"assets/img/product-mug.jpg"],
-  ["p6","Walnut Desk Organiser","Solid walnut · phone + pen slots","Home & Living",749,1099,4.8,4,"assets/img/product-organizer.jpg"],
-  ["p7","Aura TKL Keyboard 68","Tri-mode · linear red switches","Tech",1999,2499,4.7,12,"assets/img/product-keyboard.jpg"],
-  ["p8","Copper Hammered Bottle","750 ml · 99.9% pure copper","Home & Living",799,1199,4.8,3,"assets/img/product-bottle.jpg"],
+  ["p1","Ergo Wireless Mouse","2.4GHz + Bluetooth · 3 modes","Tech",499,799,4.6,40,"assets/img/product-mouse.jpg",483],
+  ["p2","Luma LED Desk Lamp","3 light tones · USB charge port","Home & Living",899,1299,4.8,32,"assets/img/product-lamp.jpg",391],
+  ["p3","USB-C 6-in-1 Hub 100W","4K HDMI · PD 100W · SD reader","Tech",1299,1799,4.5,25,"assets/img/product-hub.jpg",512],
+  ["p4","Terra Bluetooth Speaker","12h playtime · TWS pairing","Tech",1499,2199,4.7,18,"assets/img/product-speaker.jpg",428],
+  ["p5","Speckled Ceramic Mug","350 ml · handmade · microwave safe","Home & Living",349,499,4.9,60,"assets/img/product-mug.jpg",607],
+  ["p6","Walnut Desk Organiser","Solid walnut · phone + pen slots","Home & Living",749,1099,4.8,4,"assets/img/product-organizer.jpg",214],
+  ["p7","Aura TKL Keyboard 68","Tri-mode · linear red switches","Tech",1999,2499,4.7,12,"assets/img/product-keyboard.jpg",356],
+  ["p8","Copper Hammered Bottle","750 ml · 99.9% pure copper","Home & Living",799,1199,4.8,3,"assets/img/product-bottle.jpg",289],
+  ["p9","Arc Brass Desk Clock","Silent sweep movement · walnut base","Home & Living",899,1199,4.7,22,"assets/img/product-clock.jpg",173],
+  ["p10","Terracotta Herb Planter","Handmade · with saucer · drainage hole","Home & Living",449,599,4.6,35,"assets/img/product-planter.jpg",141],
+  ["p11","Sage Linen Cushion 18″","Washed linen · hidden zip · feather-touch","Home & Living",349,499,4.5,48,"assets/img/product-cushion.jpg",198],
+  ["p12","Amber Ceramic Candle","Soy wax · sandalwood & vanilla · 40h burn","Home & Living",299,399,4.8,40,"assets/img/product-candle.jpg",263],
+  ["p13","Magnetic Desk Cable Dock","Anodised aluminium · 3 cable slots","Tech",549,799,4.4,52,"assets/img/product-dock.jpg",187],
+  ["p14","Bamboo Wireless Charger","15W fast charge · phone stand · Qi certified","Tech",699,999,4.6,29,"assets/img/product-charger.jpg",235],
 ];
 if (db.prepare("SELECT COUNT(*) AS n FROM products").get().n === 0) {
-  const ins = db.prepare("INSERT INTO products (id,name,meta,tag,price,was,rating,stock,img) VALUES (?,?,?,?,?,?,?,?,?)");
+  const ins = db.prepare("INSERT INTO products (id,name,meta,tag,price,was,rating,stock,img,reviews) VALUES (?,?,?,?,?,?,?,?,?,?)");
   for (const p of SEED_PRODUCTS) ins.run(...p);
-  console.log("[seed] 8 products inserted");
+  console.log("[seed] 14 products inserted");
+} else {
+  // existing DBs: backfill the review counts for the seeded catalogue
+  const bf = db.prepare("UPDATE products SET reviews = ? WHERE id = ? AND reviews = 0");
+  for (const p of SEED_PRODUCTS) bf.run(p[9], p[0]);
+}
+
+/* ── store settings + coupons (seeded once, admin-editable) ── */
+const DEFAULT_SETTINGS = {
+  announce:      "Free delivery over ₹999 ✦ 7-day easy returns ✦ COD & UPI on delivery",
+  free_at:       "999",
+  deliver_fee:   "49",
+  cod_enabled:   "1",
+  cod_min:       "0",
+  max_qty:       "99",
+  store_live:    "1",
+  featured_ids:  '["p1","p4","p7","p2"]',
+};
+const getSetting = (k) => {
+  const row = db.prepare("SELECT value FROM store_settings WHERE key = ?").get(k);
+  return row ? row.value : DEFAULT_SETTINGS[k];
+};
+const setSetting = (k, v) => db.prepare("INSERT INTO store_settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(k, String(v));
+for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
+  if (!db.prepare("SELECT 1 FROM store_settings WHERE key = ?").get(k)) setSetting(k, v);
+}
+
+if (db.prepare("SELECT COUNT(*) AS n FROM coupons").get().n === 0) {
+  const idc = db.prepare("INSERT INTO coupons (code,type,value,min_order,max_uses) VALUES (?,?,?,?,?)");
+  idc.run("WELCOME10", "percent", 10, 0,   0);
+  idc.run("FLAT100",   "flat",    100, 999, 0);
+  idc.run("SHELF150",  "flat",    150, 1499, 100);
+  console.log("[seed] coupons: WELCOME10 · FLAT100 · SHELF150");
 }
 
 if (db.prepare("SELECT COUNT(*) AS n FROM orders").get().n === 0) {
@@ -244,7 +307,47 @@ app.put("/api/me", requireAuth, asyncWrap(async (req, res) => {
 
 /* ════════════════ PRODUCTS ════════════════ */
 const productOut = (p) => ({ id: p.id, name: p.name, meta: p.meta, tag: p.tag,
-  price: p.price, was: p.was, rating: p.rating, stock: p.stock, img: p.img, active: !!p.active });
+  price: p.price, was: p.was, rating: p.rating, stock: p.stock, img: p.img,
+  reviews: Number(p.reviews || 0), active: !!p.active });
+
+/* ════════════════ STORE CONFIG (public) ════════════════ */
+const numSetting = (k, fallback) => { const n = Number(getSetting(k)); return Number.isFinite(n) && n >= 0 ? n : fallback; };
+const storeConfig = () => {
+  let featured = [];
+  try { const a = JSON.parse(getSetting("featured_ids")); if (Array.isArray(a)) featured = a.filter(x => typeof x === "string").slice(0, 8); } catch {}
+  return {
+    announce:    getSetting("announce"),
+    freeAt:      numSetting("free_at", 999),
+    deliveryFee: numSetting("deliver_fee", 49),
+    codEnabled:  getSetting("cod_enabled") === "1",
+    codMin:      numSetting("cod_min", 0),
+    maxQty:      numSetting("max_qty", 99),
+    storeLive:   getSetting("store_live") === "1",
+    featuredIds: featured,
+  };
+};
+
+app.get("/api/store/config", (req, res) => res.json(storeConfig()));
+
+/* ════════════════ COUPONS (server-authoritative) ════════════════ */
+const couponRow = (raw) => db.prepare("SELECT * FROM coupons WHERE code = ? AND active = 1")
+  .get(String(raw || "").trim().toUpperCase()) || null;
+const couponUsable = (c) => !!c && (!c.max_uses || Number(c.used) < Number(c.max_uses));
+const computeDiscount = (c, subtotal) => {
+  if (!c || subtotal < (c.min_order || 0)) return 0;
+  return c.type === "percent" ? Math.round(subtotal * (c.value / 100)) : Math.min(c.value, subtotal);
+};
+
+app.post("/api/coupons/validate", asyncWrap(async (req, res) => {
+  const code = String(req.body?.code || "").trim().toUpperCase();
+  const subtotal = Math.max(0, Math.round(Number(req.body?.subtotal) || 0));
+  if (!code) return res.status(400).json({ error: "Enter a coupon code" });
+  const c = couponRow(code);
+  if (!c) return res.status(404).json({ error: "That coupon code doesn't exist" });
+  if (!couponUsable(c)) return res.status(409).json({ error: "This coupon has been fully used" });
+  if (subtotal < c.min_order) return res.status(400).json({ error: `Spend at least ₹${c.min_order} to use ${c.code}` });
+  res.json({ valid: true, code: c.code, type: c.type, value: c.value, min_order: c.min_order, discount: computeDiscount(c, subtotal) });
+}));
 
 app.get("/api/products", (req, res) => {
   const rows = db.prepare("SELECT * FROM products WHERE active = 1 ORDER BY created_at, id").all();
@@ -252,37 +355,58 @@ app.get("/api/products", (req, res) => {
 });
 
 /* ════════════════ ORDERS ════════════════ */
-const DELIVERY_FREE_AT = 999, DELIVERY_FEE = 49;
 const parseItems = (s) => { try { return JSON.parse(s); } catch { return []; } };
 
 app.post("/api/orders", asyncWrap(async (req, res) => {
-  const { customer_name, phone, address, note, items } = req.body || {};
+  const { customer_name, phone, address, note, items, coupon, payment } = req.body || {};
   if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "Your cart is empty" });
+  const cfg = storeConfig();
+  if (!cfg.storeLive) return res.status(503).json({ error: "The store is momentarily closed — please try again shortly" });
   const me = currentUser(req);
   const name = String(customer_name || (me && me.name) || "").trim();
   if (!name) return res.status(400).json({ error: "Please tell me your name" });
 
+  const pay = payment === "upi" ? "upi" : "cod";
+  if (pay === "cod" && !cfg.codEnabled) return res.status(400).json({ error: "Cash on Delivery is temporarily unavailable — please choose UPI on delivery" });
   const picked = [];
   let subtotal = 0;
   for (const line of items) {
-    const qty = Math.max(1, Math.min(99, Number(line.qty) || 1));
+    const qty = Math.max(1, Math.min(cfg.maxQty, Number(line.qty) || 1));
     const p = db.prepare("SELECT * FROM products WHERE id = ? AND active = 1").get(String(line.id));
     if (!p) return res.status(400).json({ error: "One of the items is no longer available" });
     if (p.stock < qty) return res.status(400).json({ error: `Only ${p.stock} left of ${p.name}` });
     picked.push({ id: p.id, name: p.name, price: p.price, qty });
     subtotal += p.price * qty;
   }
-  const total = subtotal >= DELIVERY_FREE_AT ? subtotal : subtotal + DELIVERY_FEE;
-  const info = db.prepare(`INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,status)
-                           VALUES (?,?,?,?,?,?,?,'pending')`)
+
+  // coupon — validate server-side, never trust the client's maths
+  let couponCode = "", discount = 0;
+  if (coupon && String(coupon).trim()) {
+    const c = couponRow(coupon);
+    if (!c) return res.status(400).json({ error: "That coupon code doesn't exist" });
+    if (!couponUsable(c)) return res.status(409).json({ error: "This coupon has been fully used" });
+    if (subtotal < c.min_order) return res.status(400).json({ error: `Spend at least ₹${c.min_order} to use ${c.code}` });
+    discount = computeDiscount(c, subtotal);
+    couponCode = c.code;
+  }
+
+  if (pay === "cod" && cfg.codMin > 0 && subtotal < cfg.codMin) {
+    return res.status(400).json({ error: `Cash on Delivery is available on orders of ₹${cfg.codMin} and above — please add ${(cfg.codMin - subtotal).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })} more, or choose UPI on delivery` });
+  }
+
+  const delivery = subtotal >= cfg.freeAt ? 0 : cfg.deliveryFee;
+  const total    = Math.max(0, subtotal - discount + delivery);
+  const info = db.prepare(`INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,payment,coupon_code,discount,status)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,'pending')`)
     .run(me ? me.id : null, name, String(phone || "").trim(), String(address || "").trim(), String(note || "").trim(),
-         JSON.stringify(picked), total);
+         JSON.stringify(picked), total, pay, couponCode, discount);
+  if (couponCode) db.prepare("UPDATE coupons SET used = used + 1 WHERE code = ?").run(couponCode);
   // decrement stock
   const dec = db.prepare("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?");
   for (const it of picked) dec.run(it.qty, it.id);
 
-  res.status(201).json({ order: { id: Number(info.lastInsertRowid), total, subtotal,
-    delivery: subtotal >= DELIVERY_FREE_AT ? 0 : DELIVERY_FEE, status: "pending", items: picked } });
+  res.status(201).json({ order: { id: Number(info.lastInsertRowid), total, subtotal, discount, delivery,
+    coupon: couponCode || null, payment: pay, status: "pending", items: picked } });
 }));
 
 app.get("/api/my/orders", requireAuth, (req, res) => {
@@ -376,6 +500,75 @@ app.get("/api/admin/customers", requireAdmin, (req, res) => {
 });
 app.get("/api/admin/inquiries", requireAdmin, (req, res) => {
   res.json({ inquiries: db.prepare("SELECT * FROM inquiries ORDER BY datetime(created_at) DESC, id DESC LIMIT 100").all() });
+});
+
+/* ════════════════ ADMIN · STOREFRONT ════════════════ */
+app.get("/api/admin/store-config", requireAdmin, (req, res) => {
+  const cfg = storeConfig();
+  const inv = db.prepare("SELECT COALESCE(SUM(price * stock),0) AS value, COALESCE(SUM(stock),0) AS units, COUNT(*) AS skus FROM products WHERE active = 1").get();
+  const out = db.prepare("SELECT COUNT(*) AS n FROM products WHERE active = 1 AND stock = 0").get().n;
+  const low = db.prepare("SELECT COUNT(*) AS n FROM products WHERE active = 1 AND stock > 0 AND stock <= 5").get().n;
+  res.json({ ...cfg, inventoryValue: inv.value, unitsInStock: inv.units, activeSkus: inv.skus, outOfStock: out, lowStock: low });
+});
+
+app.put("/api/admin/store-config", requireAdmin, asyncWrap(async (req, res) => {
+  const body = req.body || {};
+  const boolish = (v) => (v === true || v === "true" || v === 1 || v === "1") ? "1" : "0";
+  const num = (v, min, max, fallback) => {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n)) return String(fallback);
+    return String(Math.min(max, Math.max(min, n)));
+  };
+  if (body.announce !== undefined) {
+    const s = String(body.announce).trim().slice(0, 140);
+    setSetting("announce", s || DEFAULT_SETTINGS.announce);
+  }
+  if (body.freeAt !== undefined)      setSetting("free_at",     num(body.freeAt, 0, 100000, 999));
+  if (body.deliveryFee !== undefined) setSetting("deliver_fee", num(body.deliveryFee, 0, 1000, 49));
+  if (body.codEnabled !== undefined)  setSetting("cod_enabled", boolish(body.codEnabled));
+  if (body.codMin !== undefined)      setSetting("cod_min",     num(body.codMin, 0, 100000, 0));
+  if (body.maxQty !== undefined)      setSetting("max_qty",     num(body.maxQty, 1, 99, 99));
+  if (body.storeLive !== undefined)   setSetting("store_live",  boolish(body.storeLive));
+  if (body.featuredIds !== undefined) {
+    const ids = Array.isArray(body.featuredIds) ? body.featuredIds.filter(x => typeof x === "string").slice(0, 8) : [];
+    // keep only ids that exist
+    const valid = ids.filter(id => db.prepare("SELECT 1 FROM products WHERE id = ?").get(id));
+    setSetting("featured_ids", JSON.stringify(valid));
+  }
+  res.json({ ok: true, config: storeConfig() });
+}));
+
+app.get("/api/admin/coupons", requireAdmin, (req, res) => {
+  res.json({ coupons: db.prepare("SELECT * FROM coupons ORDER BY active DESC, created_at DESC, code").all() });
+});
+app.post("/api/admin/coupons", requireAdmin, asyncWrap(async (req, res) => {
+  const code = String(req.body?.code || "").trim().toUpperCase();
+  if (!/^[A-Z0-9_-]{3,20}$/.test(code)) return res.status(400).json({ error: "Code must be 3–20 characters: A–Z, 0–9, hyphen, underscore" });
+  const type = req.body?.type === "flat" ? "flat" : "percent";
+  const value = Math.round(Number(req.body?.value) || 0);
+  if (type === "percent" && (value < 1 || value > 90)) return res.status(400).json({ error: "Percentage must be 1–90" });
+  if (type === "flat" && value < 1) return res.status(400).json({ error: "Flat discount must be at least ₹1" });
+  const min_order = Math.max(0, Math.round(Number(req.body?.min_order) || 0));
+  const max_uses  = Math.max(0, Math.round(Number(req.body?.max_uses) || 0));
+  if (db.prepare("SELECT 1 FROM coupons WHERE code = ?").get(code)) {
+    return res.status(409).json({ error: `Coupon ${code} already exists` });
+  }
+  db.prepare("INSERT INTO coupons (code,type,value,min_order,max_uses) VALUES (?,?,?,?,?)").run(code, type, value, min_order, max_uses);
+  res.status(201).json({ coupon: db.prepare("SELECT * FROM coupons WHERE code = ?").get(code) });
+}));
+app.put("/api/admin/coupons/:code", requireAdmin, asyncWrap(async (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const c = db.prepare("SELECT * FROM coupons WHERE code = ?").get(code);
+  if (!c) return res.status(404).json({ error: "Coupon not found" });
+  if (req.body?.active !== undefined) {
+    db.prepare("UPDATE coupons SET active = ? WHERE code = ?").run((req.body.active === true || req.body.active === "true" || req.body.active === 1 || req.body.active === "1") ? 1 : 0, code);
+  }
+  res.json({ coupon: db.prepare("SELECT * FROM coupons WHERE code = ?").get(code) });
+}));
+app.delete("/api/admin/coupons/:code", requireAdmin, (req, res) => {
+  const info = db.prepare("DELETE FROM coupons WHERE code = ?").run(String(req.params.code || "").toUpperCase());
+  if (!info.changes) return res.status(404).json({ error: "Coupon not found" });
+  res.json({ ok: true });
 });
 
 /* ════════════════ STATIC SITE ════════════════ */
