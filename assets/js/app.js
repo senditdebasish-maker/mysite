@@ -19,11 +19,15 @@ const SITE = {
 
 const waLink = (text) => `https://wa.me/${SITE.whatsapp}?text=${encodeURIComponent(text)}`;
 const fmtINR = (n) => "₹" + n.toLocaleString("en-IN");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $  = (s, c = document) => c.querySelector(s);
 const $$ = (s, c = document) => [...c.querySelectorAll(s)];
 
-/* ───────── Store products (sample items — edit freely) ───────── */
-const PRODUCTS = [
+/* ───────── Store products ─────────
+   These are the OFFLINE FALLBACK (used if the API is unreachable,
+   e.g. static hosting). The live site fetches GET /api/products —
+   manage products in the Admin Dashboard. */
+let PRODUCTS = [
   { id:"p1", name:"Ergo Wireless Mouse",     meta:"2.4GHz + Bluetooth · 3 modes",     price:499,  was:799,  img:"assets/img/product-mouse.jpg",     tag:"Tech",          rating:"4.6" },
   { id:"p2", name:"Luma LED Desk Lamp",      meta:"3 light tones · USB charge port",  price:899,  was:1299, img:"assets/img/product-lamp.jpg",      tag:"Home & Living", rating:"4.8" },
   { id:"p3", name:"USB-C 6-in-1 Hub 100W",   meta:"4K HDMI · PD 100W · SD reader",    price:1299, was:1799, img:"assets/img/product-hub.jpg",       tag:"Tech",          rating:"4.5" },
@@ -68,26 +72,32 @@ $("#serviceTrack").innerHTML = SERVICES.map(s => `
     </a>
   </article>`).join("");
 
-/* ═════════ Render store carousel ═════════ */
-$("#productTrack").innerHTML = PRODUCTS.map(p => `
+/* ═════════ Render store carousel (re-callable after API load) ═════════ */
+function renderStore(){
+  $("#productTrack").innerHTML = PRODUCTS.map(p => `
   <article class="product-card">
     <div class="product-media">
-      <span class="product-tag">${p.tag}</span>
-      <span class="stock">In stock · ★ ${p.rating}</span>
-      <img src="${p.img}" alt="${p.name}" loading="lazy" width="400" height="400" />
+      <span class="product-tag">${esc(p.tag)}</span>
+      ${Number(p.stock) > 0
+        ? `<span class="stock">In stock · ★ ${esc(p.rating)}</span>`
+        : `<span class="stock stock-out">Sold out</span>`}
+      <img src="${esc(p.img)}" alt="${esc(p.name)}" loading="lazy" width="400" height="400" />
     </div>
     <div class="product-body">
-      <h3 class="product-name">${p.name}</h3>
-      <p class="product-meta">${p.meta}</p>
+      <h3 class="product-name">${esc(p.name)}</h3>
+      <p class="product-meta">${esc(p.meta)}</p>
       <div class="product-foot">
         <div class="price"><small>M.R.P. ${fmtINR(p.was)}</small>${fmtINR(p.price)}</div>
-        <button class="add-btn" data-add="${p.id}" aria-label="Add ${p.name} to cart">
+        <button class="add-btn" data-add="${p.id}" ${Number(p.stock) > 0 ? "" : "disabled"} aria-label="Add ${esc(p.name)} to cart">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           Add
         </button>
       </div>
     </div>
   </article>`).join("");
+  $("#productTrack").dispatchEvent(new Event("scroll"));   // refresh arrow edge-dimming
+}
+renderStore();
 
 /* ═════════ Render hosting plans ═════════ */
 const check = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#1f9d55" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.2 5L20 6.5"/></svg>`;
@@ -228,9 +238,9 @@ function renderCart(){
 
   wrap.innerHTML = items.map(({ product: p, qty }) => `
     <div class="cart-item">
-      <img src="${p.img}" alt="${p.name}" width="74" height="74" />
+      <img src="${esc(p.img)}" alt="${esc(p.name)}" width="74" height="74" />
       <div class="ci-body">
-        <div class="ci-name">${p.name}</div>
+        <div class="ci-name">${esc(p.name)}</div>
         <div class="ci-price">${fmtINR(p.price)} × ${qty} = ${fmtINR(p.price * qty)}</div>
         <div class="ci-row">
           <span class="qty" aria-label="Quantity">
@@ -263,7 +273,7 @@ function addToCart(id){
   const badge = $("#cartBadge");
   badge.classList.remove("pop"); void badge.offsetWidth; badge.classList.add("pop");
   const p = PRODUCTS.find(x => x.id === id);
-  showToast(`<b>${p.name}</b> added to your cart`);
+  showToast(`<b>${esc(p.name)}</b> added to your cart`);
 }
 function changeQty(id, delta){
   const item = cart.find(i => i.id === id); if (!item) return;
@@ -290,34 +300,100 @@ $("#cartOpen").addEventListener("click", openCart);
 $("#cartClose").addEventListener("click", closeCart);
 $("#cartSummary").addEventListener("click", openCart);
 
-$("#placeOrder").addEventListener("click", () => {
-  const items = cartItems(); if (!items.length) return;
-  const total = cartTotal();
-  const lines = items.map(({ product: p, qty }) => `• ${qty} × ${p.name} — ${fmtINR(p.price * qty)}`);
-  const delivery = total >= FREE_DELIVERY_AT ? "FREE" : "₹49";
-  const msg = [
-    `Hi ${SITE.brand}! I'd like to order:`,
-    ...lines,
-    ``,
-    `Subtotal: ${fmtINR(total)}`,
-    `Delivery: ${delivery}`,
-    `Total: ${total >= FREE_DELIVERY_AT ? fmtINR(total) : fmtINR(total + 49)}`,
-    ``,
-    `Please confirm availability & share payment / delivery details.`,
-  ].join("\n");
-  window.open(waLink(msg), "_blank", "noopener");
+/* ═════════ Checkout: details → POST /api/orders → WhatsApp ═════════ */
+const checkoutForm = $("#checkoutForm");
+const orderSuccess = $("#orderSuccess");
+
+function showCheckout(){
+  if (!cartItems().length) { showToast("Your cart is empty"); return; }
+  orderSuccess.hidden = true;
+  checkoutForm.hidden = false;
+  $("#cartFoot").hidden = true;
+  if (ME){
+    if (!$("#co-name").value)  $("#co-name").value  = ME.name  || "";
+    if (!$("#co-phone").value) $("#co-phone").value = ME.phone || "";
+  }
+  $("#co-name").focus();
+}
+function hideCheckout(){
+  checkoutForm.hidden = true;
+  $("#cartFoot").hidden = cartItems().length === 0;
+}
+$("#placeOrder").addEventListener("click", showCheckout);
+$("#coBack").addEventListener("click", hideCheckout);
+
+checkoutForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("#co-name"), phone = $("#co-phone"), address = $("#co-address");
+  if (!name.value.trim())  { name.focus();  showToast("Please tell me your name"); return; }
+  if (!phone.value.trim()) { phone.focus(); showToast("Please share a contact phone"); return; }
+  const btn = $("#coConfirm"); btn.disabled = true; btn.textContent = "Placing order…";
+  try {
+    const res = await fetch("/api/orders", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        customer_name: name.value, phone: phone.value, address: address.value,
+        items: cart.map(i => ({ id: i.id, qty: i.qty })),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Couldn't place the order");
+    const o = data.order;
+
+    // clear cart & switch drawer to success state
+    cart = []; saveCart(); renderCart();
+    $("#cartItems").style.display = "none"; $("#shipMeter").style.display = "none";
+    $("#cartEmpty").style.display = "none"; $("#cartFoot").hidden = true;
+    checkoutForm.hidden = true;
+    $("#osOrderId").textContent = "#" + o.id;
+    $("#osTotal").textContent = fmtINR(o.total);
+    $("#osTrack").href = ME ? "/dashboard.html" : "/login.html?next=/dashboard.html";
+    $("#osTrack").textContent = ME ? "Track my orders →" : "Sign in to track orders →";
+    orderSuccess.hidden = false;
+    // refresh live products (stock changed)
+    loadProducts();
+
+    // open WhatsApp with the order reference
+    const lines = o.items.map(i => `• ${i.qty} × ${i.name} — ${fmtINR(i.price * i.qty)}`);
+    const msg = [
+      `Hi ${SITE.brand}! I just placed order #${o.id} on your website:`,
+      ...lines,
+      ``,
+      `Subtotal: ${fmtINR(o.subtotal)}`,
+      `Delivery: ${o.delivery === 0 ? "FREE" : fmtINR(o.delivery)}`,
+      `Total: ${fmtINR(o.total)}`,
+      `Name: ${name.value.trim()} · Phone: ${phone.value.trim()}${address.value.trim() ? "\nAddress: " + address.value.trim() : ""}`,
+      ``,
+      `Please confirm stock & share payment / delivery details.`,
+    ].join("\n");
+    window.open(waLink(msg), "_blank", "noopener");
+    showToast(`<b>Order #${o.id}</b> placed — confirm on WhatsApp`);
+  } catch (err) {
+    showToast(err.message || "Order failed — try again");
+  } finally {
+    btn.disabled = false; btn.textContent = "Confirm & Place Order";
+  }
+});
+$("#osContinue").addEventListener("click", () => {
+  orderSuccess.hidden = true;
+  $("#cartItems").style.display = ""; $("#shipMeter").style.display = ""; $("#cartEmpty").style.display = ""; $("#cartFoot").hidden = cartItems().length === 0;
+  closeCart();
 });
 
-/* ═════════ Booking form → WhatsApp ═════════ */
-$("#callForm").addEventListener("submit", e => {
+/* ═════════ Booking form → saved as lead + WhatsApp ═════════ */
+$("#callForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const name = $("#f-name"), need = $("#f-need"), budget = $("#f-budget"), msg = $("#f-msg");
+  const name = $("#f-name"), need = $("#f-need"), budget = $("#f-budget"), msg = $("#f-msg"), phone = $("#f-phone");
   if (!name.value.trim()) { name.focus(); showToast("Please tell me your name"); return; }
   if (!need.value)        { need.focus(); showToast("Please choose what you need"); return; }
+  const payload = { name: name.value.trim(), phone: phone.value.trim(), need: need.value, budget: budget.value, message: msg.value.trim() };
+  // save the lead for the admin dashboard (fire-and-forget, never blocks WhatsApp)
+  fetch("/api/inquiries", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => {});
   const text = [
     `Hi ${SITE.brand}! I'm ${name.value.trim()}.`,
     `Need: ${need.value}`,
     `Budget: ${budget.value}`,
+    phone.value.trim() ? `Phone: ${phone.value.trim()}` : null,
     msg.value.trim() ? `Details: ${msg.value.trim()}` : null,
     ``,
     `Sent from your website — let's book the free 15-min call.`,
@@ -335,5 +411,53 @@ function showToast(html){
   toastTimer = setTimeout(() => toast.classList.remove("show"), 2400);
 }
 
+/* ════════════════ FULL-STACK BOOTSTRAP ════════════════
+   /api/me → swap Login button for the account chip
+   /api/products → live products from the admin dashboard */
+let ME = null;
+
+async function fetchMe(){
+  try {
+    const res = await fetch("/api/me");
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.user || null;
+  } catch { return null; }
+}
+async function loadProducts(){
+  try {
+    const res = await fetch("/api/products");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data.products) && data.products.length){
+      PRODUCTS = data.products;
+      renderStore();
+      renderCart();
+    }
+  } catch { /* static hosting → keep fallback products */ }
+}
+function renderAuthUI(){
+  const loginBtn = $("#navLogin"), account = $("#navAccount"), mobileLogin = $("#mobileLogin");
+  if (ME){
+    if (loginBtn) loginBtn.hidden = true;
+    if (account){
+      account.hidden = false;
+      account.href = ME.role === "admin" ? "/admin.html" : "/dashboard.html";
+      $("#navAccountInitial").textContent = (ME.name || "U").trim().charAt(0).toUpperCase();
+      $("#navAccountName").textContent = (ME.name || "You").trim().split(/\s+/)[0];
+    }
+    if (mobileLogin){ mobileLogin.href = account ? account.href : "/dashboard.html"; mobileLogin.firstChild.textContent = ME.role === "admin" ? "Admin Dashboard " : "My Dashboard "; }
+  } else {
+    if (loginBtn) loginBtn.hidden = false;
+    if (account) account.hidden = true;
+    if (mobileLogin){ mobileLogin.href = "/login.html"; mobileLogin.firstChild.textContent = "Login / Sign up "; }
+  }
+}
+
 /* ═════════ Init ═════════ */
-renderCart();
+(async function init(){
+  ME = await fetchMe();
+  renderAuthUI();
+  loadProducts();
+  renderCart();
+})();
