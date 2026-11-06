@@ -34,6 +34,7 @@
         ${progressHTML(o.status)}
         <div class="order-foot">
           <a class="order-help" href="${help}" target="_blank" rel="noopener">Issue with this order? Chat →</a>
+          <a class="reorder-btn invoice-link" href="invoice.html?id=${o.id}">⬇ Invoice</a>
           <button class="reorder-btn" data-reorder='${JSON.stringify((o.items || []).map(i => ({ id: i.id, qty: i.qty }))).replace(/'/g, "&apos;")}'>↺ Order again</button>
         </div>
       </article>`;

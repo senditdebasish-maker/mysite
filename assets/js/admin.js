@@ -28,6 +28,7 @@
     customers: { title: "Customers",         sub: "Everyone who created an account, by revenue." },
     inquiries: { title: "Leads",             sub: "“Book a free call” submissions — reply in one tap." },
     storefront: { title: "Storefront",       sub: "Announcement, delivery rules, coupons, featured picks and live stock." },
+    reports:   { title: "Reports",           sub: "Revenue pulse, best-sellers, payment mix and coupon performance." },
   };
 
   let me = null;
@@ -59,6 +60,7 @@
       if (tab === "customers") await loadCustomers();
       if (tab === "inquiries") await loadInquiries();
       if (tab === "storefront") await loadStorefront();
+      if (tab === "reports") await loadReport();
       if (announce) toast("Refreshed");
     } catch (err) {
       toast(err.message || "Couldn’t load — is the server running?");
@@ -122,6 +124,7 @@
         <td>
           ${esc(o.customer_name)}
           <br /><span class="muted" style="font-size:.72rem">${esc(o.phone || "no phone")}${o.user_email ? " · " + esc(o.user_email) : " · guest"}</span>
+          <br /><span class="pay-chip">${o.payment === "upi" ? "UPI on delivery" : "COD"}${o.coupon_code ? ` · ${esc(o.coupon_code)}` : ""}${o.discount ? ` (−${inr(o.discount)})` : ""}</span>
           ${o.address ? `<br /><span class="muted" style="font-size:.7rem">${esc(o.address)}</span>` : ""}
           ${o.note ? `<br /><span class="muted" style="font-size:.7rem">Note: ${esc(o.note)}</span>` : ""}
         </td>
@@ -499,6 +502,43 @@
       toast(`+10 restocked — ${stock} in stock`);
     } catch (err) { toast(err.message); }
   });
+
+  /* ───────── reports ───────── */
+  async function loadReport() {
+    const r = await fetchJSON("api/admin/report");
+    $("#rpAov").textContent = inr(r.aov || 0);
+    $("#rpOrdersAll").textContent = `${r.ordersAllTime || 0} orders all time`;
+    $("#rpUnits").textContent = String(r.units30d || 0);
+    $("#rpCouponOrders").textContent = String(r.coupons?.orders || 0);
+    $("#rpCouponSaved").textContent = `${inr(r.coupons?.saved || 0)} saved by customers`;
+    $("#rpPaySplit").textContent = `${r.payment?.cod || 0} / ${r.payment?.upi || 0}`;
+
+    const days = r.days || [];
+    const max = Math.max(1, ...days.map(d => d.revenue));
+    const fmtDay = (iso) => { const d = new Date(iso + "T00:00:00"); return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" }); };
+    $("#rpChart").innerHTML = days.map(d => `
+      <div class="rp-col" title="${fmtDay(d.date)} — ${inr(d.revenue)} · ${d.orders} order${d.orders === 1 ? "" : "s"}">
+        <span class="rp-col-val">${d.revenue ? "₹" + (d.revenue >= 1000 ? (d.revenue / 1000).toFixed(1) + "k" : d.revenue) : ""}</span>
+        <div class="rp-bar${d.revenue === 0 ? " is-zero" : ""}" style="height:${Math.max(3, Math.round(d.revenue / max * 130))}px"></div>
+        <span class="rp-col-label">${fmtDay(d.date).split(" ")[0]}</span>
+      </div>`).join("");
+    const total14 = days.reduce((s, d) => s + d.revenue, 0);
+    $("#rpTotal14").textContent = `${inr(total14)} in 14 days`;
+    $("#rpChartStart").textContent = days.length ? fmtDay(days[0].date) : "—";
+    $("#rpChartEnd").textContent = days.length ? fmtDay(days[days.length - 1].date) : "—";
+
+    const top = r.topProducts || [];
+    $("#rpTopBody").innerHTML = top.map(x => `
+      <tr><td><strong>${esc(x.name)}</strong></td><td>${x.units}</td><td>${inr(x.revenue)}</td></tr>`).join("")
+      || `<tr><td colspan="3" class="muted">No sales in the last 30 days.</td></tr>`;
+
+    const cod = r.payment?.cod || 0, upi = r.payment?.upi || 0, t = Math.max(1, cod + upi);
+    $("#rpBarCod").style.width = Math.round(cod / t * 100) + "%";
+    $("#rpBarUpi").style.width = Math.round(upi / t * 100) + "%";
+    $("#rpValCod").textContent = `${cod} orders · ${inr(r.payment?.codRevenue || 0)}`;
+    $("#rpValUpi").textContent = `${upi} orders · ${inr(r.payment?.upiRevenue || 0)}`;
+    $("#rpPayNote").textContent = upi >= cod ? "UPI is healthy — keep both options on." : "COD still dominates — consider a small prepaid discount to shift mix.";
+  }
 
   /* ───────── boot ───────── */
   bindLogout("logoutBtn");

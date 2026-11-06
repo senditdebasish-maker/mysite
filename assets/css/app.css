@@ -338,3 +338,30 @@ table.tbl{ width:100%; border-collapse:collapse; font-size:.85rem; }
   .sf-grid{ grid-template-columns:1fr !important }
   .sf-stats{ grid-template-columns:repeat(2,1fr) }
 }
+
+/* ══════════ ADMIN · REPORTS PAGE ══════════ */
+.rp-chart{ display:flex; align-items:flex-end; gap:5px; height:170px; padding:.4rem .1rem 0 }
+.rp-col{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:.28rem; height:100%; min-width:0 }
+.rp-col-val{ font-size:.58rem; font-weight:800; color:var(--ink-soft); white-space:nowrap; font-variant-numeric:tabular-nums }
+.rp-bar{
+  width:100%; max-width:40px; min-height:3px; border-radius:6px 6px 2px 2px;
+  background:linear-gradient(180deg, var(--orange) 0%, #d1401c 100%);
+  transition:height .5s cubic-bezier(.3,.9,.3,1);
+}
+.rp-bar.is-zero{ background:var(--sand-deep) }
+.rp-col-label{ font-size:.6rem; color:var(--muted); font-variant-numeric:tabular-nums }
+.rp-axis{ display:flex; justify-content:space-between; font-size:.62rem; color:var(--muted); border-top:1px solid var(--sand); padding-top:.3rem; margin-top:.3rem }
+
+.rp-pay{ display:flex; flex-direction:column; gap:.55rem; padding:.2rem 0 .1rem }
+.rp-pay-row{ display:flex; align-items:center; gap:.55rem }
+.rp-pay-label{ width:34px; font-size:.72rem; font-weight:800; color:var(--ink-soft) }
+.rp-pay-bar{ flex:1; height:14px; background:var(--sand); border-radius:999px; overflow:hidden }
+.rp-pay-fill{ height:100%; border-radius:999px; transition:width .5s ease }
+.rp-pay-fill.cod{ background:linear-gradient(90deg,#E8542F,#f08a4b) }
+.rp-pay-fill.upi{ background:linear-gradient(90deg,#5a4fd2,#8f86ec) }
+.rp-pay-val{ font-size:.7rem; font-weight:700; color:var(--muted); white-space:nowrap; min-width:130px; text-align:right; font-variant-numeric:tabular-nums }
+
+.pay-chip{
+  display:inline-block; margin-top:.18rem; font-size:.62rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--orange-deep); background:#fff3e8; border:1px solid #f3c1a6; border-radius:6px; padding:.08rem .35rem;
+}

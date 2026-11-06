@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Invoice — debasish.</title>
+<meta name="robots" content="noindex" />
+<meta name="theme-color" content="#141414" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23141414'/%3E%3Ctext x='26' y='45' font-family='Georgia,serif' font-weight='700' font-size='38' fill='%23FAF6EF' text-anchor='middle'%3Ed%3C/text%3E%3Ccircle cx='45' cy='43' r='5.5' fill='%23E8542F'/%3E%3C/svg%3E" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Inter:wght@400..800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/app.css" />
+<style>
+  body{ background:#efeae0; }
+  .inv-shell{ max-width:860px; margin:0 auto; padding:1rem clamp(.6rem,3vw,1.5rem) 2rem; }
+  .inv-toolbar{ display:flex; justify-content:space-between; align-items:center; gap:.6rem; margin:.4rem 0 1rem; flex-wrap:wrap; }
+  .inv-toolbar-title{ font-family:var(--font-display); font-weight:900; font-size:1.1rem; letter-spacing:-.02em; margin:0 }
+  .invoice{
+    background:#fff; border:1px solid #e2ddcf; border-radius:8px; box-shadow:0 18px 50px rgba(20,20,20,.12);
+    padding:clamp(1.1rem,3vw,1.8rem); font-size:.82rem; color:#1c1c1c;
+  }
+  .inv-head{ display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; border-bottom:3px solid #141414; padding-bottom:.8rem }
+  .inv-brand{ font-family:var(--font-display); font-weight:900; font-size:1.6rem; letter-spacing:-.03em; text-decoration:none; color:#141414 }
+  .inv-brand span{ color:#E8542F }
+  .inv-sub{ margin:.15rem 0 0; font-size:.68rem; color:#666 }
+  .inv-gstin{ font-size:.66rem; color:#666; margin:.35rem 0 0 }
+  .inv-title-block{ text-align:right }
+  .inv-title{ font-family:var(--font-display); font-weight:900; font-size:1.05rem; letter-spacing:.18em; margin:0; text-transform:uppercase }
+  .inv-meta{ font-size:.72rem; color:#444; margin:.3rem 0 0; line-height:1.7 }
+  .inv-meta strong{ color:#141414 }
+  .inv-cols{ display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin:.8rem 0 }
+  .inv-box h3{ font-size:.58rem; letter-spacing:.18em; text-transform:uppercase; color:#999; margin:0 0 .2rem }
+  .inv-box p{ margin:.1rem 0; line-height:1.5 }
+  table.inv-tbl{ width:100%; border-collapse:collapse; margin:.4rem 0 .2rem }
+  .inv-tbl th{ text-align:left; font-size:.6rem; letter-spacing:.14em; text-transform:uppercase; color:#fff; background:#141414; padding:.38rem .5rem }
+  .inv-tbl td{ padding:.42rem .5rem; border-bottom:1px solid #ece7da; font-size:.78rem }
+  .inv-tbl td:last-child, .inv-tbl th:last-child{ text-align:right }
+  .inv-tbl td.c, .inv-tbl th.c{ text-align:center }
+  .inv-totals{ display:flex; justify-content:flex-end; margin-top:.35rem }
+  .inv-totals table{ border-collapse:collapse; min-width:250px }
+  .inv-totals td{ padding:.16rem .4rem; font-size:.78rem }
+  .inv-totals td:last-child{ text-align:right; font-variant-numeric:tabular-nums }
+  .inv-grand td{ border-top:2px solid #141414; font-weight:900; font-size:.95rem; padding-top:.32rem }
+  .inv-words{ font-size:.66rem; color:#555; font-style:italic; margin:.3rem 0 0 }
+  .inv-foot{ border-top:1px dashed #d8d2c4; margin-top:.7rem; padding-top:.5rem; display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; font-size:.62rem; color:#777 }
+  .inv-terms{ margin:.55rem 0 0; font-size:.62rem; color:#888; line-height:1.55 }
+  .inv-status{ display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; background:#fff3e0; color:#9a5b00; border:1px solid #f0d6a8 }
+  .inv-status.delivered{ background:#edf7ef; color:#17753f; border-color:#cfe8d4 }
+  .inv-status.cancelled{ background:#fbe9e4; color:#b02a1e; border-color:#f0c0b6 }
+  .inv-err{ text-align:center; padding:2.5rem 1rem }
+  @media print {
+    body{ background:#fff }
+    .inv-toolbar{ display:none !important }
+    .inv-shell{ padding:0; max-width:none }
+    .invoice{ border:0; box-shadow:none; border-radius:0; padding:0 }
+    @page { size: A4; margin: 12mm }
+  }
+</style>
+</head>
+<body>
+<div class="inv-shell">
+  <div class="inv-toolbar">
+    <div>
+      <p class="inv-toolbar-title">Invoice</p>
+      <p class="muted" style="margin:0; font-size:.75rem">Print or save as PDF — use your browser’s print dialog.</p>
+    </div>
+    <div style="display:flex; gap:.5rem">
+      <a class="btn btn-ghost btn-sm" href="dashboard.html">← My orders</a>
+      <button class="btn btn-ink btn-sm" id="printInvoice" type="button">⬇ Print / Save PDF</button>
+    </div>
+  </div>
+
+  <div class="invoice" id="invoiceRoot" hidden>
+    <div class="inv-head">
+      <div>
+        <a class="inv-brand" href="index.html">debasish<span>.</span></a>
+        <p class="inv-sub" id="invSellerLine">Web design · Hosting · Handpicked store</p>
+        <p class="inv-sub" id="invSellerAddr">Kolkata, West Bengal 700001, India</p>
+        <p class="inv-gstin">GSTIN: <b id="invGstin">—</b></p>
+        <p class="inv-gstin"><span id="invSellerEmail">—</span> · <span id="invSellerPhone">—</span></p>
+      </div>
+      <div class="inv-title-block">
+        <p class="inv-title">Tax Invoice</p>
+        <p class="inv-meta">Invoice <strong id="invId">#0</strong><br />Date: <strong id="invDate">—</strong><br />Status: <span class="inv-status" id="invStatus">pending</span></p>
+      </div>
+    </div>
+
+    <div class="inv-cols">
+      <div class="inv-box">
+        <h3>Bill to</h3>
+        <p><strong id="invCustName">—</strong></p>
+        <p id="invCustPhone">—</p>
+        <p id="invCustAddr" class="inv-sub">—</p>
+      </div>
+      <div class="inv-box" style="text-align:right">
+        <h3>Payment</h3>
+        <p><strong id="invPayment">—</strong></p>
+        <p class="inv-sub" id="invCouponRow" hidden>Coupon: <b id="invCoupon">—</b> (−<span id="invDiscount">₹0</span>)</p>
+        <p class="inv-sub">Supply: intra-state (West Bengal)</p>
+      </div>
+    </div>
+
+    <table class="inv-tbl">
+      <thead><tr><th>#</th><th>Item</th><th class="c">Qty</th><th class="c">Rate ₹</th><th>Amount ₹</th></tr></thead>
+      <tbody id="invItems"></tbody>
+    </table>
+
+    <div class="inv-totals">
+      <table>
+        <tr><td>Subtotal</td><td id="invSub">₹0</td></tr>
+        <tr id="invDiscountRow" hidden><td>Coupon discount</td><td>−<span id="invDiscount2">₹0</span></td></tr>
+        <tr><td>Delivery</td><td id="invDelivery">₹0</td></tr>
+        <tr><td>Incl. GST (18%)</td><td id="invGst">₹0</td></tr>
+        <tr class="inv-grand"><td>Total</td><td id="invTotal">₹0</td></tr>
+      </table>
+    </div>
+    <p class="inv-words" id="invWords">—</p>
+
+    <p class="inv-terms">Prices are inclusive of GST. Returns accepted within 7 days of delivery for damaged or wrong items (unboxing video helps). This is a computer-generated invoice — no signature required. For support: WhatsApp the order number. GSTIN shown is a sample — replace with your registered number before live trade.</p>
+
+    <div class="inv-foot">
+      <span>debasish. — The Shelf · Kolkata</span>
+      <span>Thank you for shopping with us 🙏</span>
+    </div>
+  </div>
+
+  <div class="inv-err" id="invoiceError" hidden>
+    <p><strong>Couldn’t load this invoice.</strong></p>
+    <p class="muted" id="invoiceErrorMsg">Sign in with the account that placed the order.</p>
+    <a class="btn btn-ink" href="login.html?next=invoice.html">Sign in →</a>
+  </div>
+</div>
+<script src="assets/js/invoice.js" defer></script>
+</body>
+</html>

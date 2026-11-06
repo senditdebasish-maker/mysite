@@ -46,10 +46,12 @@ ADMIN_EMAIL=me@studio.in ADMIN_PASSWORD='a-strong-password' npm start
 | `/services.html` | **Services** — full catalogue: 6 services with inclusions, 4-step process, FAQ, WhatsApp quotes |
 | `/hosting.html`  | **Hosting** — 3 plans (₹199/₹499/₹999 + GST), included-features grid, comparison table, FAQ |
 | `/store.html`    | **The Shelf** — enterprise storefront: announcement bar, Today’s Deals rail with midnight countdown, category/price facets, instant search, sort, quick view, wishlist, coupons, COD & UPI on delivery, GST-inclusive totals |
+| `/product/<id>` | **Product pages** (canonical, server-rendered SEO) — `/product/p5` etc.: gallery zoom, specs, highlights, FBT bundle, “frequently bought together” add, same-category reco rail, ratings & written reviews, review form for signed-in customers, breadcrumb, OG/Twitter tags + Product JSON-LD injected per request |
+| `/invoice.html` | **GST tax invoice** — printable A4 invoice per order (owner or admin only); amount in words, 18% GST-inclusive split, seller GSTIN block, “computer-generated” terms |
 | `/contact.html`  | **Book a free call** — WhatsApp/call/email channels + brief form (saves to admin Leads) |
 | `/login.html`   | Split-screen sign in / create account (tabs, demo-creds autofill) |
 | `/dashboard.html` | **Customer dashboard** — My Orders with live status stepper, reorder, profile edit |
-| `/admin.html`   | **Admin dashboard** — Overview stats, Orders, Products, Customers, Leads inbox, **Storefront** (announcement, delivery rules, COD gate, LIVE/closed toggle, featured picks, coupon manager, inventory quick adjust) |
+| `/admin.html`   | **Admin dashboard** — Overview stats, Orders, Products, Customers, Leads inbox, **Storefront** (announcement, delivery rules, COD gate, LIVE/closed toggle, featured picks, coupon manager, inventory quick adjust), **Reports** (avg order value, units moved 30 d, coupon performance, COD-vs-UPI mix, 14-day revenue chart, top-selling products) |
 
 The nav tabs on every page link to these dedicated pages; the home page keeps the snap-scroll single-page experience.
 
@@ -58,6 +60,9 @@ The nav tabs on every page link to these dedicated pages; the home page keeps th
 - **Real auth** — scrypt-hashed passwords, HttpOnly session cookies (30-day), login throttling (8 tries / 5 min), role-based access (`user` / `admin`)
 - **Working cart → checkout → order** — server computes totals, delivery fee, stock checks & decrements; free delivery over ₹999 (else ₹49)
 - **Enterprise storefront** — 14-product catalog with reviews, instant search, price buckets, category counts, in-stock filter, popularity/discount/price/rating sort, Today’s Deals rail with live countdown, quick view (qty stepper, share), localStorage wishlist, delivery ETA per card
+- **Reviews & ratings** — seeded reviews per product, average + distribution bars, signed-in customers can write one review per product (server-enforced), verified buyer badges on order-derived stats
+- **Printed invoices** — every order gets an A4 GST tax invoice (browser print / Save as PDF), owner- or admin-only, with seller GSTIN and amount-in-words
+- **SEO done right** — every public page ships canonical + OG/Twitter meta (origin-resolved per request), Product pages get fully injected head + Product JSON-LD (aggregateRating, price, availability), `/sitemap.xml` (static pages + all products), `/robots.txt` (blocks admin/dashboard/invoice/api), 301 `/index.html → /`
 - **Server-side coupon engine** — `WELCOME10` (10% off), `FLAT100`, `SHELF150` seeded; min-order, max-uses and percentage caps enforced on the server and re-validated at order time; GST-inclusive price line on the cart
 - **COD & UPI on delivery** — selectable at checkout; server gates COD (enable/disable + minimum order) via Admin → Storefront
 - **Admin → Storefront page** — inventory value & units, out/low-stock badges, announcement bar editor, free-delivery threshold / fee / max-qty / COD rules, LIVE ⇄ restocking toggle (checkout closes), featured-picks grid, coupon CRUD with active toggles, inline stock adjust with +10 restock |
@@ -72,8 +77,12 @@ The nav tabs on every page link to these dedicated pages; the home page keeps th
 ```
 POST /api/auth/register|login|logout     GET/PUT /api/me
 GET  /api/products                       (public, active only)        GET /api/store/config
+GET  /product/<id>                       (HTML; OG/canonical/JSON-LD injected per request)
+GET  /api/products/<id>/reviews          (public)   POST …/reviews     (signed-in; one per user per product)
+GET  /api/invoices/<orderId>             (owner or admin — printable GST invoice data)
 POST /api/coupons/validate               (public: code + basket subtotal → discount)
 POST /api/orders                         GET /api/my/orders
+GET  /sitemap.xml   GET /robots.txt
 POST /api/inquiries                      (public, from the contact form)
 ── admin only ───────────────────────────────────────────────
 GET  /api/admin/stats      GET/PUT  /api/admin/orders[/:id/status]
@@ -81,6 +90,7 @@ GET/POST/PUT/DELETE /api/admin/products[/:id]   (DELETE = soft, keeps order hist
 GET  /api/admin/customers  GET /api/admin/inquiries
 GET/PUT /api/admin/store-config           (announcement, free-delivery, COD rules, live toggle, featured ids)
 GET/POST/PUT/DELETE /api/admin/coupons[/:code]   (PUT toggles active)
+GET  /api/admin/report                    (14-day revenue, top products, payment mix, coupon usage, AOV)
 ```
 
 Errors return `{ error: "message" }` with a proper HTTP status. The server never serves
@@ -97,7 +107,10 @@ assets/css/styles.css      home page theme      assets/css/app.css   login/dashb
 assets/css/pages.css       shared chrome for the 4 tab pages (nav, footer, heroes, cards, FAQ)
 assets/js/app.js           home page logic      assets/js/ui.js      shared helpers (toast/fetch/fmt)
 assets/js/subpages.js      tab pages: mobile menu, live cart badge, auth-aware nav
-assets/js/store.js         enterprise storefront (facets, deals rail, quick view, wishlist, coupons)
+assets/js/store-core.js    shared DD engine (cart, coupons, checkout, toast, store config, products cache)
+assets/js/store.js         storefront layer (facets, deals rail, quick view, wishlist) — cards link to /product/<id>
+product.html / assets/js/product.js   canonical product page
+assets/js/invoice.js       printable GST invoice   invoice.html
 assets/js/contact.js       brief form
 assets/js/login.js         auth page            assets/js/dashboard.js customer dashboard
 assets/js/admin.js         admin dashboard
@@ -112,6 +125,8 @@ examples/                  design mockups shown before building
 3. Replace `assets/img/portrait.jpg` with your own photo.
 4. Wordmark is `debasish.` — change it if you use a business brand.
 5. Set `ADMIN_EMAIL` / `ADMIN_PASSWORD` env vars; change session length with `SESSION_DAYS` (default 30).
+6. Seller details printed on invoices/emails: `SELLER_LINE` (business name), `SELLER_ADDR` (address), `SELLER_GSTIN` (your GST number). Defaults are **sample values** marked “(sample)” — replace them before real use.
+7. Public site URL for absolute OG/canonical links is derived from the incoming request (works out of the box behind any domain/proxy); no env var needed.
 
 ## Local preview of the static-only variant
 

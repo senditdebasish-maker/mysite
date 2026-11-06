@@ -91,10 +91,22 @@ CREATE TABLE IF NOT EXISTS store_settings (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS reviews (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  name       TEXT NOT NULL DEFAULT 'Customer',
+  rating     INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+  title      TEXT NOT NULL DEFAULT '',
+  body       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(product_id, user_id)
+);
 CREATE INDEX IF NOT EXISTS idx_sessions_user   ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user     ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status   ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created  ON orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_reviews_product  ON reviews(product_id);
 `);
 
 /* ── migrations for databases created before the storefront build ── */
@@ -175,6 +187,65 @@ if (db.prepare("SELECT COUNT(*) AS n FROM coupons").get().n === 0) {
   idc.run("FLAT100",   "flat",    100, 999, 0);
   idc.run("SHELF150",  "flat",    150, 1499, 100);
   console.log("[seed] coupons: WELCOME10 · FLAT100 · SHELF150");
+}
+
+/* ── sample reviews (seeded once; wiped by deleting data/site.db) ── */
+if (getSetting("reviews_seeded") !== "1") {
+  const sample = [
+    ["p1", [ ["Rohit Sharma", 5, "Daily driver, zero complaints", "Pairs with both my laptop and phone. Battery lasts forever and the scroll wheel is buttery."],
+             ["Ananya Iyer", 4, "Versatile but a bit light", "Three connection modes are genuinely useful. Would prefer a heavier shell for desk stability."],
+             ["Debasish Banerjee", 5, "Best mouse under ₹500", "I have used it 8 hours a day for 3 months. Zero double-click issues so far."] ] ],
+    ["p2", [ ["Megha Kulkarni", 5, "Perfect for late-night work", "The warm tone is easy on the eyes and the USB port charges my Kindle. Highly recommend."],
+             ["Suresh Pillai", 5, "Premium look", "Metal build, three brightness levels and a wobble-free base. Worth every rupee."],
+             ["Priya Nair", 4, "Very good, bright max", "Runs a bit bright on max for small desks — but the lowest tone is ideal for reading."] ] ],
+    ["p3", [ ["Arvind Menon", 5, "Desk setup sorted", "HDMI + 100W PD + SD reader — one cable to my monitor and the laptop charges. Elite hub."],
+             ["Kavya Deshmukh", 4, "Gets warm under load", "Works flawlessly. It warms up during long 4K transfers, nothing worrying."],
+             ["Rahul Verma", 4, "Great value", "PD pass-through is the killer feature. Packaging was solid."] ] ],
+    ["p4", [ ["Ishita Roy", 5, "Bass for days", "Paired two units for party stereo. 12h battery claim is accurate — charged once all weekend."],
+             ["Nikhil Joshi", 5, "Monsoon-proof sound", "Took it to a lake-side trip. IPX5 and still going strong."],
+             ["Sneha Kulkarni", 4, "Excellent for the price", "TWS pairing is a bit fiddly the first time, then it just works."] ] ],
+    ["p5", [ ["Tanvi Chopra", 5, "My morning ritual", "Handmade glaze is gorgeous, tea stays hot forever, microwave safe. Bought six for gifts."],
+             ["Rohit Sharma", 5, "Restaurant vibes at home", "350 ml is the perfect chai size. Will reorder in different colours."],
+             ["Divya Menon", 5, "Zero chips after months", "Daily office use for 4 months — no cracks, no glaze fade."] ] ],
+    ["p6", [ ["Arjun Malhotra", 5, "Desk candy", "Solid walnut, holds phone + pens + cards. Smells amazing. Build quality is heirloom grade."],
+             ["Pooja Rao", 4, "Beautiful but compact", "Smaller than expected — ideal for single-monitor setups. Craftsmanship is superb."],
+             ["Vikram Shetty", 5, "Gift-worthy", "Bought it as a gift, ended up keeping one for myself too."] ] ],
+    ["p7", [ ["Rohit Sharma", 5, "Creamy typing", "Linear reds are office-quiet, tri-mode works across PC + tablet + phone. 68 keys is the sweet spot."],
+             ["Ananya Iyer", 5, "Kept my old keyboard for nothing", "Sound profile is thocky out of the box. Stabilisers lubed well."],
+             ["Debasish Banerjee", 4, "Great board, dongle life", "One 2.4 GHz dongle, works perfectly. Bluetooth mode has slight lag for gaming."] ] ],
+    ["p8", [ ["Megha Kulkarni", 5, "Tradition, modern finish", "Hammered finish is stunning, water tastes noticeably fresher. Easy to hand-wash."],
+             ["Suresh Pillai", 4, "Heavy but worth it", "750 ml full copper is no joke on weight — but the temperature retention is unreal."],
+             ["Priya Nair", 5, "Daily ayurveda", "Using it for 6 months. Once a month a lemon-salt polish keeps it glowing."] ] ],
+    ["p9", [ ["Arvind Menon", 5, "Silent and classy", "Sweep second hand means zero tick noise. Walnut base matches my desk perfectly."],
+             ["Kavya Deshmukh", 4, "Accurate time", "Gained 2 seconds in a month. Looks way more expensive than it is."],
+             ["Rahul Verma", 5, "Vintage soul", "The brass patina is developing beautifully. 10/10 desk upgrade."] ] ],
+    ["p10", [ ["Ishita Roy", 5, "Basil is thriving", "Drainage hole + saucer, exactly as described. Herbs love this thing."],
+              ["Nikhil Joshi", 5, "Handmade charm", "No two are alike — mine has lovely texture. Packed with zero breakage."],
+              ["Sneha Kulkarni", 4, "Perfect size", "Ideal for kitchen herbs. Wish it came in a 10-inch variant too."] ] ],
+    ["p11", [ ["Tanvi Chopra", 5, "Softest cushion ever", "Washed linen is pre-distressed to perfection. Sage colour matches the photos exactly."],
+              ["Rohit Sharma", 4, "True to colour", "Feather-touch feel is real. The insert could be a touch firmer."],
+              ["Divya Menon", 5, "Sofa transformed", "Bought two. The hidden zip is invisible even up close."] ] ],
+    ["p12", [ ["Arjun Malhotra", 5, "Sandalwood heaven", "40-hour burn claim is real — mine is on week 3. Fills the living room, never overpowering."],
+              ["Pooja Rao", 5, "Date-night staple", "Vanilla-sandalwood blend is unisex and elegant. Dinner-party essential."],
+              ["Vikram Shetty", 4, "Lovely, wish for bigger jars", "Fragrance throw is excellent. Would love a 100-hour XL size."] ] ],
+    ["p13", [ ["Rohit Sharma", 5, "Bye-bye cable nest", "Three slots, magnetic pop-up ends, holds Lightning + USB-C + Watch. Desk finally looks adult."],
+              ["Ananya Iyer", 4, "Strong magnets", "Cables snap in satisfyingly. A hair lighter would be nice but stability is great."],
+              ["Debasish Banerjee", 4, "Minimal and useful", "Does exactly what it says. Anodised finish resists scratches."] ] ],
+    ["p14", [ ["Megha Kulkarni", 5, "Charging, standing", "15W fast charge works — phone goes 0→50% before my morning chai. Bamboo base is gorgeous."],
+              ["Suresh Pillai", 5, "Gift success", "Gave one to my dad; he uses it daily. Stand angle is perfect for video calls."],
+              ["Priya Nair", 4, "Case friendly", "Charges through my rugged case. Superb value for the price."] ] ],
+  ];
+  const ins = db.prepare("INSERT INTO reviews (product_id, user_id, name, rating, title, body) VALUES (?, NULL, ?, ?, ?, ?)");
+  db.exec("BEGIN");
+  try {
+    for (const [pid, rows] of sample) for (const [n, r, ttl, b] of rows) ins.run(pid, n, r, ttl, b);
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+  setSetting("reviews_seeded", "1");
+  console.log("[seed] sample reviews inserted");
 }
 
 if (db.prepare("SELECT COUNT(*) AS n FROM orders").get().n === 0) {
@@ -502,6 +573,95 @@ app.get("/api/admin/inquiries", requireAdmin, (req, res) => {
   res.json({ inquiries: db.prepare("SELECT * FROM inquiries ORDER BY datetime(created_at) DESC, id DESC LIMIT 100").all() });
 });
 
+/* ════════════════ REVIEWS ════════════════ */
+const escHtml = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const getProductActive = (id) => db.prepare("SELECT * FROM products WHERE id = ? AND active = 1").get(String(id));
+
+app.get("/api/products/:id/reviews", (req, res) => {
+  const pid = String(req.params.id || "");
+  if (!getProductActive(pid)) return res.status(404).json({ error: "Product not found" });
+  const rows = db.prepare("SELECT id, name, rating, title, body, created_at FROM reviews WHERE product_id = ? ORDER BY id DESC LIMIT 12").all(pid);
+  res.json({ reviews: rows });
+});
+
+app.post("/api/products/:id/reviews", requireAuth, asyncWrap(async (req, res) => {
+  const pid = String(req.params.id || "");
+  const prod = getProductActive(pid);
+  if (!prod) return res.status(404).json({ error: "Product not found" });
+  const rating = Math.round(Number(req.body?.rating));
+  if (!Number.isFinite(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: "Pick a star rating (1–5)" });
+  const title = String(req.body?.title || "").trim().slice(0, 80);
+  const body  = String(req.body?.body  || "").trim().slice(0, 600);
+  if (body.length < 4) return res.status(400).json({ error: "Please write a few words about the product" });
+  const exists = db.prepare("SELECT 1 FROM reviews WHERE product_id = ? AND user_id = ?").get(pid, req.user.id);
+  if (exists) return res.status(409).json({ error: "You’ve already reviewed this product" });
+  db.prepare("INSERT INTO reviews (product_id, user_id, name, rating, title, body) VALUES (?,?,?,?,?,?)")
+    .run(pid, req.user.id, req.user.name, rating, title, body);
+  db.prepare("UPDATE products SET reviews = reviews + 1 WHERE id = ?").run(pid);
+  const review = db.prepare("SELECT id, name, rating, title, body, created_at FROM reviews WHERE product_id = ? AND user_id = ?").get(pid, req.user.id);
+  res.status(201).json({ ok: true, review });
+}));
+
+/* ════════════════ INVOICES (owner or admin only) ════════════════ */
+const sellerInfo = () => ({
+  name: "Debasish Das — Web Studio & Store",
+  line: process.env.SELLER_LINE || "Web design · Hosting · Handpicked store",
+  addr: process.env.SELLER_ADDR || "Kolkata, West Bengal 700001, India",
+  gstin: process.env.SELLER_GSTIN || "19ABCDE1234F1Z5 (sample)",
+  email: process.env.SELLER_EMAIL || "hello@example.com",
+  phone: process.env.SELLER_PHONE || "+91 00000 00000",
+});
+
+app.get("/api/invoices/:id", requireAuth, (req, res) => {
+  const id = Number(req.params.id);
+  const o = Number.isInteger(id) ? db.prepare("SELECT * FROM orders WHERE id = ?").get(id) : null;
+  if (!o) return res.status(404).json({ error: "Invoice not found" });
+  if (o.user_id !== req.user.id && req.user.role !== "admin") return res.status(403).json({ error: "Not your invoice" });
+  const items = parseItems(o.items_json);
+  const subtotal = items.reduce((s, i) => s + Number(i.price || 0) * Number(i.qty || 0), 0);
+  const discount = Number(o.discount || 0);
+  const delivery = Math.max(0, Number(o.total) - subtotal + discount);
+  const gst = Math.round(Number(o.total) * 18 / 118);
+  res.json({
+    invoice: {
+      id: o.id, createdAt: o.created_at, status: o.status,
+      customer: { name: o.customer_name, phone: o.phone, address: o.address },
+      items: items.map(i => ({ id: i.id, name: i.name, price: Number(i.price || 0), qty: Number(i.qty || 0), lineTotal: Number(i.price || 0) * Number(i.qty || 0) })),
+      subtotal, discount, delivery, total: Number(o.total), gstIncluded: gst,
+      payment: o.payment || "cod", coupon: o.coupon_code || "",
+    },
+    seller: sellerInfo(),
+  });
+});
+
+/* ════════════════ ADMIN · REPORT (last 30 days) ════════════════ */
+app.get("/api/admin/report", requireAdmin, (req, res) => {
+  const days = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 864e5);
+    const key = d.toISOString().slice(0, 10);
+    const row = db.prepare("SELECT COUNT(*) AS orders, COALESCE(SUM(total),0) AS revenue FROM orders WHERE status != 'cancelled' AND date(created_at) = date(?)").get(key);
+    days.push({ date: key, orders: row.orders, revenue: row.revenue });
+  }
+  const recent = db.prepare("SELECT items_json, total, payment, coupon_code, discount, status FROM orders WHERE status != 'cancelled' AND datetime(created_at) >= datetime('now','-30 days')").all();
+  const byProduct = new Map();
+  let cod = 0, upi = 0, codRev = 0, upiRev = 0, couponOrders = 0, couponSaved = 0, units = 0;
+  for (const o of recent) {
+    if (o.payment === "upi") { upi++; upiRev += o.total; } else { cod++; codRev += o.total; }
+    if (o.coupon_code) { couponOrders++; couponSaved += Number(o.discount || 0); }
+    for (const it of parseItems(o.items_json)) {
+      const key = it.id;
+      const agg = byProduct.get(key) || { id: it.id, name: it.name, units: 0, revenue: 0 };
+      agg.units += Number(it.qty || 0); agg.revenue += Number(it.price || 0) * Number(it.qty || 0);
+      byProduct.set(key, agg); units += Number(it.qty || 0);
+    }
+  }
+  const topProducts = [...byProduct.values()].sort((a, b) => b.units - a.units).slice(0, 5);
+  const allTime = db.prepare("SELECT COALESCE(AVG(total),0) AS aov, COUNT(*) AS orders FROM orders WHERE status != 'cancelled'").get();
+  res.json({ days, topProducts, payment: { cod, upi, codRevenue: codRev, upiRevenue: upiRev }, coupons: { orders: couponOrders, saved: couponSaved }, units30d: units, aov: Math.round(allTime.aov), ordersAllTime: allTime.orders });
+});
+
+/* ════════════════ ADMIN · STOREFRONT ════════════════ */
 /* ════════════════ ADMIN · STOREFRONT ════════════════ */
 app.get("/api/admin/store-config", requireAdmin, (req, res) => {
   const cfg = storeConfig();
@@ -571,12 +731,95 @@ app.delete("/api/admin/coupons/:code", requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+/* ════════════════ PRODUCT PAGE (server-rendered head for SEO/social) ════════════════ */
+const fmtInrServer = (n) => "₹" + Number(n).toLocaleString("en-IN");
+const productTemplate = (() => {
+  let cache = null;
+  return () => {
+    if (cache) return cache;
+    try { cache = fs.readFileSync(path.join(ROOT, "product.html"), "utf8"); } catch { cache = null; }
+    return cache;
+  };
+})();
+app.get("/product/:id", (req, res) => {
+  const id = String(req.params.id || "");
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(id)) return res.status(404).sendFile(path.join(ROOT, "404.html"));
+  const p = getProductActive(id);
+  if (!p) return res.status(404).sendFile(path.join(ROOT, "404.html"));
+
+  const base = `${req.protocol}://${req.get("host")}`;
+  const imgAbs = `${base}/${p.img.replace(/^\/+/, "")}`;
+  const url = `${base}/product/${p.id}`;
+  const title = `${p.name} — ${fmtInrServer(p.price)} | The Shelf · debasish.`;
+  const desc = `${p.name} — ${p.meta}. ${fmtInrServer(p.price)} (GST included). Free delivery above ₹999 · COD & UPI on delivery · 7-day easy returns.`;
+  const jsonld = JSON.stringify({
+    "@context": "https://schema.org", "@type": "Product",
+    name: p.name, sku: p.id.toUpperCase(), image: imgAbs,
+    description: `${p.name} — ${p.meta}.`,
+    brand: { "@type": "Brand", name: "debasish." },
+    aggregateRating: { "@type": "AggregateRating", ratingValue: p.rating, reviewCount: p.reviews },
+    offers: {
+      "@type": "Offer", url, priceCurrency: "INR", price: p.price, itemCondition: "https://schema.org/NewCondition",
+      availability: p.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+      seller: { "@type": "Organization", name: "debasish. — Web Studio & Store" },
+    },
+  }).replace(/</g, "\\u003c");
+
+  const template = productTemplate();
+  if (!template) return res.status(500).send("Product template missing");
+  const repl = { "__PRODUCT_ID_TOKEN__": p.id, "__BASE__": base, "__TITLE__": escHtml(title), "__DESC__": escHtml(desc), "__OG_IMAGE__": imgAbs, "__CANONICAL__": url, "__JSONLD__": jsonld };
+  const html = Object.entries(repl).reduce((acc, [k, v]) => acc.split(k).join(v), template);
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(html);
+});
+
+/* ════════════════ SITEMAP + ROBOTS (publicity) ════════════════ */
+app.get("/sitemap.xml", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
+  const urls = ["/", "/services.html", "/hosting.html", "/store.html", "/contact.html", "/login.html"];
+  const prods = db.prepare("SELECT id, created_at FROM products WHERE active = 1 ORDER BY id").all();
+  const today = new Date().toISOString().slice(0, 10);
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map(u => `  <url><loc>${base}${u}</loc><lastmod>${today}</lastmod><changefreq>weekly</changefreq><priority>${u === "/" ? "1.0" : "0.8"}</priority></url>`).join("\n")}
+${prods.map(p => `  <url><loc>${base}/product/${p.id}</loc><lastmod>${today}</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>`).join("\n")}
+</urlset>`;
+  res.setHeader("Content-Type", "application/xml; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.send(xml);
+});
+app.get("/robots.txt", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.send(`User-agent: *\nAllow: /\nDisallow: /admin.html\nDisallow: /dashboard.html\nDisallow: /invoice.html\nDisallow: /api/\n\nSitemap: ${base}/sitemap.xml\n`);
+});
+
 /* ════════════════ STATIC SITE ════════════════ */
 /* Never serve the database, server source, or anything sensitive. */
 const STATIC_BLOCK = [/^\/data(\/|$)/i, /^\/server(\/|$)/i, /^\/node_modules(\/|$)/i, /^\/package(-lock)?\.json$/i, /^\/README\.md$/i];
 app.use((req, res, next) => {
   if (STATIC_BLOCK.some(rx => rx.test(req.path))) return res.status(404).send("Not found");
   next();
+});
+
+/* HTML pages get __BASE__ tokens resolved to the request origin (OG/canonical URLs) */
+app.get("/index.html", (req, res) => res.redirect(301, "/"));
+app.get("/index", (req, res) => res.redirect(301, "/"));
+const HTML_PAGES = { "/": "index.html", "/services.html": "services.html", "/hosting.html": "hosting.html", "/store.html": "store.html", "/contact.html": "contact.html" };
+const pageCache = new Map();
+app.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD") return next();
+  const file = HTML_PAGES[req.path];
+  if (!file) return next();
+  let html = pageCache.get(file);
+  if (!html) {
+    try { html = fs.readFileSync(path.join(ROOT, file), "utf8"); pageCache.set(file, html); } catch { return next(); }
+  }
+  const base = `${req.protocol}://${req.get("host")}`;
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(html.split("__BASE__").join(base));
 });
 
 app.use(express.static(ROOT, {
