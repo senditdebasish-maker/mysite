@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WEBFORGE — Websites that sell, stores that convert</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ===== Custom cursor ===== -->
+<div class="cursor-dot" aria-hidden="true"></div>
+<div class="cursor-ring" aria-hidden="true"></div>
+
+<!-- ===== Nav ===== -->
+<header class="nav" id="nav">
+  <a class="brand" href="#hero">
+    <span class="brand-mark">//</span> WEBFORGE
+  </a>
+  <nav class="nav-links" id="navLinks">
+    <a href="#work">Work</a>
+    <a href="#services">Services</a>
+    <a href="#ceo">About</a>
+    <a href="#store">Store</a>
+    <a href="#contact" class="nav-cta">Let's talk ↗</a>
+  </nav>
+  <button class="cart-btn" id="cartBtn" aria-label="Open cart">
+    🛒 <span class="cart-count" id="cartCount">0</span>
+  </button>
+  <button class="burger" id="burger" aria-label="Menu"><span></span><span></span><span></span></button>
+</header>
+
+<!-- ===== Snap-scroll stage ===== -->
+<main class="snap-stage" id="snapStage">
+
+  <!-- SECTION 1 · HERO (WEBFORGE style) -->
+  <section class="snap-section hero" id="hero" data-label="01 — Hello">
+    <div class="hero-bg">
+      <div class="globe-lines"></div>
+      <div class="blob blob-1"></div>
+      <div class="blob blob-2"></div>
+      <div class="grid-overlay"></div>
+    </div>
+    <p class="hero-kicker reveal">// Digital craft. Human connection.</p>
+    <div class="hero-content">
+      <div class="hero-text">
+        <span class="hero-pill reveal"><i></i> Strategy. Design. Development. In sync.</span>
+        <h1 class="hero-title">
+          <span class="line"><span>Technology,</span></span>
+          <span class="line"><span>with a human</span></span>
+          <span class="line"><span class="lime">face.</span></span>
+        </h1>
+        <p class="hero-sub reveal">We design and build digital products that feel intuitive, perform beautifully, and help ambitious brands grow.</p>
+        <div class="hero-actions reveal">
+          <a href="#contact" class="btn btn-cyan">Build with us →</a>
+          <a href="#work" class="btn btn-ghost">See our work ↗</a>
+        </div>
+        <div class="hero-feats reveal">
+          <div class="feat"><span class="feat-ic">✦</span><div><strong>Better by design</strong><small>Made for real people</small></div></div>
+          <div class="feat"><span class="feat-ic">&lt;/&gt;</span><div><strong>Built to scale</strong><small>Clean code. Future ready.</small></div></div>
+          <div class="feat"><span class="feat-ic">📈</span><div><strong>Focused on impact</strong><small>Results that last</small></div></div>
+        </div>
+        <div class="hero-trust reveal">
+          <p>Trusted by startups, scale-ups &amp; bold teams</p>
+          <div class="logos"><span>NEXA</span><span>Pioneer</span><span>LUMEN</span><span>Nortbio</span></div>
+        </div>
+      </div>
+      <div class="hero-face reveal">
+        <img src="assets/face.jpg" alt="Founder portrait" class="face-img" />
+        <div class="chip chip-1">Good ideas.<br><strong>Well built.</strong><hr>That's our craft.</div>
+        <div class="chip chip-2"><code>const impact = design + code + partnership;</code></div>
+        <div class="chip chip-3">Faster launches.<br><strong>Stronger growth. ↗</strong></div>
+      </div>
+    </div>
+    <p class="hero-foot reveal">// Thoughtful process. Tangible results.</p>
+    <div class="hero-bar">
+      <span>🌐 Websites &amp; Platforms</span>
+      <span>◈ Brand Experiences</span>
+      <span>🛡 Built for what's next</span>
+    </div>
+    <div class="section-tag">01 / 07</div>
+  </section>
+
+  <!-- SECTION 2 · CEO -->
+  <section class="snap-section ceo" id="ceo" data-label="02 — CEO">
+    <div class="ceo-wrap">
+      <div class="ceo-photo reveal">
+        <div class="ceo-frame"><img src="assets/ceo.jpg" alt="CEO at work" /></div>
+        <div class="ceo-chip">★ Founder &amp; CEO</div>
+      </div>
+      <div class="ceo-text">
+        <p class="eyebrow reveal">Meet the CEO</p>
+        <h2 class="reveal">The person behind <em class="grad-text">every pixel</em></h2>
+        <p class="reveal">I started WEBFORGE to prove that a small studio can build websites as beautiful as big agencies — and sell real products alongside. Every project gets my personal attention, from first sketch to launch day.</p>
+        <div class="ceo-stats reveal">
+          <div><strong>50+</strong><span>sites launched</span></div>
+          <div><strong>6 yrs</strong><span>experience</span></div>
+          <div><strong>100%</strong><span>client-first</span></div>
+        </div>
+        <a href="#contact" class="btn btn-primary reveal">Work with me</a>
+      </div>
+    </div>
+    <div class="section-tag">02 / 07</div>
+  </section>
+
+  <!-- SECTION 3 · SERVICES -->
+  <section class="snap-section services" id="services" data-label="03 — Services">
+    <div class="section-head">
+      <p class="eyebrow reveal">What we do</p>
+      <h2 class="reveal">One studio, <em class="grad-text">two crafts</em></h2>
+    </div>
+    <div class="cards">
+      <article class="card reveal">
+        <div class="card-icon">💻</div>
+        <h3>Client Websites</h3>
+        <p>Landing pages, portfolios and full business sites — animated, responsive and built to convert visitors into customers.</p>
+        <ul><li>Custom design, no templates</li><li>Speed &amp; SEO baked in</li><li>Launch in weeks, not months</li></ul>
+      </article>
+      <article class="card reveal">
+        <div class="card-icon">🛍️</div>
+        <h3>Our Own Store</h3>
+        <p>Browse products right here, add them to your cart and check out. Your cart is saved in the browser until you order.</p>
+        <ul><li>Live cart with saved items</li><li>Simple checkout flow</li><li>Order tracking</li></ul>
+        <a href="#store" class="card-link">Browse products →</a>
+      </article>
+    </div>
+    <div class="section-tag">03 / 07</div>
+  </section>
+
+  <!-- SECTION 3 · STORE -->
+  <section class="snap-section store" id="store" data-label="03 — Store">
+    <div class="section-head">
+      <p class="eyebrow reveal">The store</p>
+      <h2 class="reveal">Pick something. <em class="grad-text">Cart saves itself.</em></h2>
+    </div>
+
+    <!-- Horizontal carousel (drag + buttons) -->
+    <div class="carousel-wrap reveal">
+      <button class="car-btn" id="carPrev" aria-label="Previous">←</button>
+      <div class="carousel" id="carousel">
+        <article class="product" data-id="p1" data-name="Aurora Desk Lamp" data-price="1499">
+          <div class="product-img" style="--hue:210">🌙</div>
+          <h3>Aurora Desk Lamp</h3>
+          <p class="price">₹1,499</p>
+          <button class="btn btn-primary add-cart">Add to cart</button>
+        </article>
+        <article class="product" data-id="p2" data-name="Nimbus Backpack" data-price="2899">
+          <div class="product-img" style="--hue:280">🎒</div>
+          <h3>Nimbus Backpack</h3>
+          <p class="price">₹2,899</p>
+          <button class="btn btn-primary add-cart">Add to cart</button>
+        </article>
+        <article class="product" data-id="p3" data-name="Echo Wireless Buds" data-price="3499">
+          <div class="product-img" style="--hue:160">🎧</div>
+          <h3>Echo Wireless Buds</h3>
+          <p class="price">₹3,499</p>
+          <button class="btn btn-primary add-cart">Add to cart</button>
+        </article>
+        <article class="product" data-id="p4" data-name="Terra Ceramic Mug Set" data-price="899">
+          <div class="product-img" style="--hue:20">☕</div>
+          <h3>Terra Mug Set ×4</h3>
+          <p class="price">₹899</p>
+          <button class="btn btn-primary add-cart">Add to cart</button>
+        </article>
+        <article class="product" data-id="p5" data-name="Flux Mechanical Keyboard" data-price="4999">
+          <div class="product-img" style="--hue:330">⌨️</div>
+          <h3>Flux Keyboard</h3>
+          <p class="price">₹4,999</p>
+          <button class="btn btn-primary add-cart">Add to cart</button>
+        </article>
+        <article class="product" data-id="p6" data-name="Lumen Smart Watch" data-price="5999">
+          <div class="product-img" style="--hue:190">⌚</div>
+          <h3>Lumen Smart Watch</h3>
+          <p class="price">₹5,999</p>
+          <button class="btn btn-primary add-cart">Add to cart</button>
+        </article>
+      </div>
+      <button class="car-btn" id="carNext" aria-label="Next">→</button>
+    </div>
+    <p class="carousel-hint reveal">← drag or use arrows — cart persists in your browser →</p>
+    <div class="section-tag">04 / 07</div>
+  </section>
+
+  <!-- SECTION 4 · WORK (horizontal scroll strip) -->
+  <section class="snap-section work" id="work" data-label="04 — Work">
+    <div class="section-head">
+      <p class="eyebrow reveal">Selected work</p>
+      <h2 class="reveal">Recent client <em class="grad-text">launches</em></h2>
+    </div>
+    <div class="work-strip" id="workStrip">
+      <div class="work-card"><div class="work-thumb t1"></div><h3>Café chain ordering site</h3><span>E-commerce · 2026</span></div>
+      <div class="work-card"><div class="work-thumb t2"></div><h3>Fitness coach portfolio</h3><span>Portfolio · 2026</span></div>
+      <div class="work-card"><div class="work-thumb t3"></div><h3>Real-estate listings</h3><span>Web app · 2025</span></div>
+      <div class="work-card"><div class="work-thumb t4"></div><h3>Bakery brand + store</h3><span>Branding · 2025</span></div>
+      <div class="work-card"><div class="work-thumb t5"></div><h3>SaaS landing page</h3><span>Landing · 2026</span></div>
+    </div>
+    <div class="section-tag">05 / 07</div>
+  </section>
+
+  <!-- SECTION 5 · PROCESS -->
+  <section class="snap-section process" id="process" data-label="05 — Process">
+    <div class="section-head">
+      <p class="eyebrow reveal">How it works</p>
+      <h2 class="reveal">From idea to <em class="grad-text">live site</em> in 4 steps</h2>
+    </div>
+    <ol class="steps">
+      <li class="step reveal"><span class="step-num">1</span><h3>Discover</h3><p>We learn your business, goals and audience.</p></li>
+      <li class="step reveal"><span class="step-num">2</span><h3>Design</h3><p>Custom animated concepts — you pick, we refine.</p></li>
+      <li class="step reveal"><span class="step-num">3</span><h3>Build</h3><p>Fast, responsive code. Cart &amp; orders included if you sell.</p></li>
+      <li class="step reveal"><span class="step-num">4</span><h3>Launch</h3><p>We go live, measure, and keep improving.</p></li>
+    </ol>
+    <div class="section-tag">06 / 07</div>
+  </section>
+
+  <!-- SECTION 6 · CONTACT -->
+  <section class="snap-section contact" id="contact" data-label="06 — Contact">
+    <div class="contact-inner">
+      <p class="eyebrow reveal">Say hello</p>
+      <h2 class="reveal">Got a project? <em class="grad-text">Let's talk.</em></h2>
+      <form class="contact-form reveal" id="contactForm">
+        <input type="text" placeholder="Your name" required />
+        <input type="email" placeholder="Email" required />
+        <textarea placeholder="Tell us about your project or order…" rows="3" required></textarea>
+        <button class="btn btn-primary" type="submit">Send message</button>
+      </form>
+      <p class="form-note" id="formNote"></p>
+    </div>
+    <footer class="footer">© 2026 WEBFORGE · Websites + Store · Made with ♥ in Kolkata</footer>
+    <div class="section-tag">07 / 07</div>
+  </section>
+
+</main>
+
+<!-- ===== Cart drawer (overflow/transform locked) ===== -->
+<aside class="cart-drawer" id="cartDrawer" aria-label="Shopping cart">
+  <div class="cart-head">
+    <h3>Your cart</h3>
+    <button id="cartClose" aria-label="Close cart">✕</button>
+  </div>
+  <div class="cart-items" id="cartItems"></div>
+  <div class="cart-foot">
+    <div class="cart-total">Total: <strong id="cartTotal">₹0</strong></div>
+    <button class="btn btn-primary" id="checkoutBtn">Checkout</button>
+    <p class="cart-saved">✔ Saved in your browser</p>
+  </div>
+</aside>
+<div class="scrim" id="scrim"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
