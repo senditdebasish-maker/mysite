@@ -1,35 +1,54 @@
 # mysite — Debasish Das · Web Studio & Store
 
-Single-screen (scroll-less, `100dvh`), live home page for a business that offers
-**web design & development · hosting & domains · an online store of physical products**.
+Full-page **scroll-snap** home page (overflow-locked body, one screen per section,
+horizontal snap carousels) for a business offering **web design & development ·
+hosting & domains · an online store of physical products**.
 Plain static site — no build step, no dependencies. Upload and it works.
+
+## Architecture — the locked page pattern
+
+```
+body                    position: overflow hidden          ← overflow/transform lock
+└── .scroller           100dvh · overflow-y: scroll        ← the ONLY scroll container
+    └── .snap-section   height: 100dvh · snap-align: start ← full-page snap, one screen each
+        ├── #home      hero (portrait, badges, marquee ticker)
+        ├── #services  horizontal snap carousel (scroll-snap-type: x)
+        ├── #hosting   pricing plan cards
+        ├── #store     horizontal snap carousel (the shelf) + cart
+        └── #contact   book-a-call channels + WhatsApp form
+```
+
+Extras: fixed nav + bottom marquee ticker + right rail section-dots + top progress line.
+Keyboard navigation: `↑` / `↓` / `PageUp` / `PageDown` / `Home` / `End` jumps between sections;
+dots/rail/nav all smooth-scroll. On mobile (< 1024px) snap is disabled and sections flow naturally.
 
 ## Structure
 
 ```
-index.html            ← the home page (all screens: hero, store, services, hosting, contact, cart)
+index.html            ← one page, five full-screen sections, cart drawer, toast
 assets/css/styles.css ← light editorial theme (cream / ink / #E8542F orange)
-assets/js/app.js      ← SITE config + products/services/plans data + cart logic
+assets/js/app.js      ← SITE config + products/services/plans + cart + snap/carousel logic
 assets/img/           ← portrait & product photos (AI-generated samples)
-examples/             ← the 3 design mockups shown before building
+examples/             ← design mockups shown before building
 ```
 
 ## ✏️ Personalise before going live
 
-1. Open `assets/js/app.js` → edit the `SITE` block at the top:
-   - `whatsapp` — your number with country code, digits only (e.g. `919812345678`)
+1. Open `assets/js/app.js` → edit the `SITE` block:
+   - `whatsapp` — your number, country code, digits only (e.g. `919812345678`)
    - `phoneDisplay`, `email`, `location`, `hours`
-2. Same file → edit `PRODUCTS` (real products, prices, photos), `SERVICES`, `PLANS`.
-3. Replace `assets/img/portrait.jpg` with your own photo (keep a square-ish crop).
-4. Swap the wordmark `debasish.` in `index.html` if you use a business brand name.
+2. Same file → edit `PRODUCTS`, `SERVICES`, `PLANS`.
+3. Replace `assets/img/portrait.jpg` with your own photo (square-ish crop).
+4. Wordmark is `debasish.` in `index.html` — change it if you use a business brand.
 
 ## Features
 
-- **Scroll-less hero** — whole first screen fits any desktop viewport (`overflow:hidden`, 100dvh); falls back to normal scrolling on mobile / short screens
-- **Live feel** — pulsing availability dot, rotating dashed ring, floating badge cards, infinite marquee (`prefers-reduced-motion` respected)
-- **Working cart** — add/remove/qty, persisted in `localStorage`, free-delivery progress bar (₹999+)
-- **WhatsApp checkout & booking** — orders and call requests are sent to your WhatsApp pre-filled; no backend needed
-- **Overlays** (store / services / hosting / contact) keep the page at one screen while offering deep content
+- **Full-page scroll-snap** sections with locked body overflow (desktop)
+- **Horizontal carousels** with arrows + edge dimming for Services and the Store shelf
+- **Live feel** — pulsing availability dot, rotating dashed ring, floating badges, bottom marquee ticker, top scroll-progress line, rail dots that track the active section
+- **Working cart** — qty steppers, `localStorage` persistence, free-delivery progress bar (₹999+)
+- **WhatsApp checkout & booking** — orders and call requests are sent pre-filled; no backend
+- Respects `prefers-reduced-motion`, keyboard accessible, focus-visible outlines
 
 ## Local preview
 

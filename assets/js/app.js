@@ -1,15 +1,17 @@
 /* ══════════════════════════════════════════════════════════
    Debasish Das — Web Studio & Store
+   Patterns: overflow lock · full-page scroll-snap sections ·
+   horizontal snap carousels · WhatsApp checkout
    ────────────────────────────────────────────────────────
-   ✏️  EDIT ME — your real details (nothing else to change):
+   ✏️  EDIT ME — your real details:
    ══════════════════════════════════════════════════════════ */
 const SITE = {
   brand:        "Debasish Das",
-  // WhatsApp number: country code + number, NO +, spaces or dashes.
+  // WhatsApp: country code + number, NO +, spaces or dashes.
   // ⚠️ Placeholder below (starts with 0 = not a real subscriber). Replace it!
   whatsapp:     "910000000000",
-  phoneDisplay: "+91 00000 00000",     // shown on the page — replace with your real number
-  email:        "hello@example.com",   // shown on the page — replace with your real email
+  phoneDisplay: "+91 00000 00000",
+  email:        "hello@example.com",
   location:     "Kolkata, West Bengal, India",
   hours:        "Mon–Sat · 9 AM – 8 PM IST",
 };
@@ -22,20 +24,24 @@ const $$ = (s, c = document) => [...c.querySelectorAll(s)];
 
 /* ───────── Store products (sample items — edit freely) ───────── */
 const PRODUCTS = [
-  { id:"p1", name:"Ergo Wireless Mouse",     meta:"2.4GHz + Bluetooth · 3 modes",  price:499,  was:799,  img:"assets/img/product-mouse.jpg",     tag:"Tech",        rating:"4.6" },
-  { id:"p2", name:"Luma LED Desk Lamp",      meta:"3 light tones · USB charge port", price:899,  was:1299, img:"assets/img/product-lamp.jpg",      tag:"Home & Living", rating:"4.8" },
-  { id:"p3", name:"USB-C 6-in-1 Hub 100W",   meta:"4K HDMI · PD 100W · SD reader", price:1299, was:1799, img:"assets/img/product-hub.jpg",       tag:"Tech",        rating:"4.5" },
-  { id:"p4", name:"Terra Bluetooth Speaker", meta:"12h playtime · TWS pairing",    price:1499, was:2199, img:"assets/img/product-speaker.jpg",   tag:"Tech",        rating:"4.7" },
+  { id:"p1", name:"Ergo Wireless Mouse",     meta:"2.4GHz + Bluetooth · 3 modes",     price:499,  was:799,  img:"assets/img/product-mouse.jpg",     tag:"Tech",          rating:"4.6" },
+  { id:"p2", name:"Luma LED Desk Lamp",      meta:"3 light tones · USB charge port",  price:899,  was:1299, img:"assets/img/product-lamp.jpg",      tag:"Home & Living", rating:"4.8" },
+  { id:"p3", name:"USB-C 6-in-1 Hub 100W",   meta:"4K HDMI · PD 100W · SD reader",    price:1299, was:1799, img:"assets/img/product-hub.jpg",       tag:"Tech",          rating:"4.5" },
+  { id:"p4", name:"Terra Bluetooth Speaker", meta:"12h playtime · TWS pairing",       price:1499, was:2199, img:"assets/img/product-speaker.jpg",   tag:"Tech",          rating:"4.7" },
   { id:"p5", name:"Speckled Ceramic Mug",    meta:"350 ml · handmade · microwave safe", price:349, was:499, img:"assets/img/product-mug.jpg",      tag:"Home & Living", rating:"4.9" },
-  { id:"p6", name:"Walnut Desk Organiser",   meta:"Solid walnut · phone + pen slots", price:749, was:1099, img:"assets/img/product-organizer.jpg", tag:"Home & Living", rating:"4.8" },
+  { id:"p6", name:"Walnut Desk Organiser",   meta:"Solid walnut · phone + pen slots", price:749,  was:1099, img:"assets/img/product-organizer.jpg", tag:"Home & Living", rating:"4.8" },
+  { id:"p7", name:"Aura TKL Keyboard 68",    meta:"Tri-mode · linear red switches",   price:1999, was:2499, img:"assets/img/product-keyboard.jpg",  tag:"Tech",          rating:"4.7" },
+  { id:"p8", name:"Copper Hammered Bottle",  meta:"750 ml · 99.9% pure copper",       price:799,  was:1199, img:"assets/img/product-bottle.jpg",    tag:"Home & Living", rating:"4.8" },
 ];
 
 /* ───────── Services ───────── */
 const SERVICES = [
-  { name:"Business Website",      price:"from ₹7,999",  tag:"7-day delivery", desc:"Fast, mobile-first website for your shop/clinic/salon/agency — design, code, basic SEO and launch handled end-to-end.", wa:"Hi Debasish! I want a Business Website. Please share details & a quote." },
-  { name:"E-commerce / Store",    price:"from ₹12,999", tag:"Sell online",    desc:"Product catalogue, cart, WhatsApp or Razorpay checkout, order notifications — your own online shop, managed by me.", wa:"Hi Debasish! I want an online store for my business. Please share details & a quote." },
-  { name:"Hosting & Domains",     price:"from ₹199/yr", tag:"Free SSL",       desc:".in / .com domains, NVMe hosting, free SSL, professional email (you@yourbrand.com) and free migration from your old host.", wa:"Hi Debasish! I need hosting / a domain. Please share plans & pricing." },
-  { name:"Care Plan",             price:"₹999 / mo",    tag:"Peace of mind",  desc:"Monthly updates, daily backups, security checks, small content edits and priority WhatsApp support for your site.", wa:"Hi Debasish! I'm interested in the monthly Care Plan. Please share details." },
+  { name:"Business Website",  price:"from ₹7,999",  tag:"7-day delivery", desc:"Fast, mobile-first website for your shop / clinic / salon / agency — design, code, basic SEO and launch, end to end.", wa:"Hi Debasish! I want a Business Website. Please share details & a quote." },
+  { name:"E-commerce / Store",price:"from ₹12,999", tag:"Sell online",    desc:"Product catalogue, cart, WhatsApp or Razorpay checkout, order notifications — your own online shop, managed by me.", wa:"Hi Debasish! I want an online store for my business. Please share details & a quote." },
+  { name:"Hosting & Domains", price:"from ₹199/yr", tag:"Free SSL",       desc:".in / .com domains, NVMe hosting, free SSL, professional email (you@yourbrand.com) and free migration from your old host.", wa:"Hi Debasish! I need hosting / a domain. Please share plans & pricing." },
+  { name:"Care Plan",         price:"₹999 / mo",    tag:"Peace of mind",  desc:"Monthly updates, backups, security checks, small content edits and priority WhatsApp support for your live site.", wa:"Hi Debasish! I'm interested in the monthly Care Plan. Please share details." },
+  { name:"Website Rescue",    price:"from ₹2,499",  tag:"Fix it fast",    desc:"Broken layout, hacked pages, slow loads, plugin mess — I take over, diagnose and ship a fixed, backed-up site in days.", wa:"Hi Debasish! My website has issues — I need a Website Rescue. Please help." },
+  { name:"SEO & Speed Audit", price:"from ₹1,999",  tag:"Get found",      desc:"A 20-point teardown: Core Web Vitals, on-page SEO, keywords, Google Business Profile — with a clear action plan you can act on.", wa:"Hi Debasish! I want an SEO & Speed audit for my website. Please share the report details." },
 ];
 
 /* ───────── Hosting plans ───────── */
@@ -46,10 +52,24 @@ const PLANS = [
 ];
 
 const FREE_DELIVERY_AT = 999;
+const scroller = $("#scroller");
 
-/* ═════════ Render store ═════════ */
-const storeGrid = $("#storeGrid");
-storeGrid.innerHTML = PRODUCTS.map(p => `
+/* ═════════ Render service carousel ═════════ */
+$("#serviceTrack").innerHTML = SERVICES.map(s => `
+  <article class="sc-card">
+    <span class="service-tag">${s.tag}</span>
+    <div class="sc-top">
+      <h3 class="sc-name">${s.name}</h3>
+      <div class="sc-price">${s.price}<small>all-inclusive quote</small></div>
+    </div>
+    <p class="sc-desc">${s.desc}</p>
+    <a class="service-cta" href="${waLink(s.wa)}" target="_blank" rel="noopener">Get this on WhatsApp
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M9 7h8v8"/></svg>
+    </a>
+  </article>`).join("");
+
+/* ═════════ Render store carousel ═════════ */
+$("#productTrack").innerHTML = PRODUCTS.map(p => `
   <article class="product-card">
     <div class="product-media">
       <span class="product-tag">${p.tag}</span>
@@ -62,29 +82,15 @@ storeGrid.innerHTML = PRODUCTS.map(p => `
       <div class="product-foot">
         <div class="price"><small>M.R.P. ${fmtINR(p.was)}</small>${fmtINR(p.price)}</div>
         <button class="add-btn" data-add="${p.id}" aria-label="Add ${p.name} to cart">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           Add
         </button>
       </div>
     </div>
   </article>`).join("");
 
-/* ═════════ Render services ═════════ */
-$("#serviceList").innerHTML = SERVICES.map(s => `
-  <article class="service-card">
-    <span class="service-tag">${s.tag}</span>
-    <div class="service-top">
-      <h3 class="service-name">${s.name}</h3>
-      <div class="service-price">${s.price}<small>all-inclusive quote</small></div>
-    </div>
-    <p class="service-desc">${s.desc}</p>
-    <a class="service-cta" href="${waLink(s.wa)}" target="_blank" rel="noopener">Get this on WhatsApp
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M9 7h8v8"/></svg>
-    </a>
-  </article>`).join("");
-
 /* ═════════ Render hosting plans ═════════ */
-const check = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#1f9d55" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.2 5L20 6.5"/></svg>`;
+const check = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#1f9d55" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.2 5L20 6.5"/></svg>`;
 $("#planGrid").innerHTML = PLANS.map(p => `
   <article class="plan ${p.popular ? "plan-popular" : ""}">
     ${p.popular ? '<span class="plan-badge">Most Popular</span>' : ''}
@@ -95,7 +101,7 @@ $("#planGrid").innerHTML = PLANS.map(p => `
     <a class="plan-cta" href="${waLink(p.wa)}" target="_blank" rel="noopener">Choose ${p.name} — order on WhatsApp</a>
   </article>`).join("");
 
-/* ═════════ Contact channel links (from SITE config) ═════════ */
+/* ═════════ Contact channel links (from SITE) ═════════ */
 $("#waChannel").href = waLink(`Hi ${SITE.brand}! I found your website and would like to talk.`);
 $("#callChannel").href = `tel:${SITE.whatsapp.replace(/^91(?=\d{10}$)/, "+91")}`;
 $("#callChannelSub").textContent = SITE.phoneDisplay;
@@ -103,50 +109,105 @@ $("#waChannelSub").textContent = `${SITE.phoneDisplay} · usually replies in min
 $("#emailChannelSub").textContent = SITE.email;
 $("#emailChannel").href = `mailto:${SITE.email}`;
 $("#locationLine").textContent = `${SITE.location} · ${SITE.hours}`;
+$("#yearNow").textContent = new Date().getFullYear();
 
-/* ═════════ Overlay open/close ═════════ */
-let lastFocus = null;
-function openOverlay(name){
-  const ov = $(`#overlay-${name}`);
-  if (!ov) return;
-  lastFocus = document.activeElement;
-  ov.classList.add("open");
-  ov.setAttribute("aria-hidden", "false");
-  $(".mobile-menu").hidden = true; $("#hamburger").setAttribute("aria-expanded","false");
-  const focusable = ov.querySelector("button, a[href], input, select, textarea");
-  (focusable || ov).focus?.();
+/* ══════════════════════════════════════════════════════════
+   SECTION NAVIGATION — full-page snap helpers
+   ══════════════════════════════════════════════════════════ */
+const SECTION_IDS = ["home", "services", "hosting", "store", "contact"];
+const sections = SECTION_IDS.map(id => document.getElementById(id));
+
+function goTo(id){
+  const target = document.getElementById(id);
+  if (!target) return;
+  // scroller is the scroll container on desktop; body scrolls on mobile
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+  closeMobileMenu();
 }
-function closeOverlay(ov){
-  ov.classList.remove("open");
-  ov.setAttribute("aria-hidden", "true");
-  if (lastFocus) lastFocus.focus();
+$$("[data-goto]").forEach(btn => btn.addEventListener("click", () => { closeCart(); goTo(btn.dataset.goto); }));
+
+function setActiveSection(id){
+  $$(".nav-link").forEach(l => l.classList.toggle("is-active", l.dataset.goto === id));
+  $$(".rail-dot").forEach(d => d.classList.toggle("is-active", d.dataset.goto === id));
 }
-$$("[data-open]").forEach(btn => btn.addEventListener("click", () => { closeCart(); openOverlay(btn.dataset.open); }));
-$$(".overlay").forEach(ov => {
-  ov.addEventListener("click", e => { if (e.target === ov) closeOverlay(ov); });
-  ov.querySelectorAll("[data-close]").forEach(btn => btn.addEventListener("click", () => closeOverlay(ov)));
-});
-document.addEventListener("keydown", e => {
-  if (e.key !== "Escape") return;
-  const openOv = $(".overlay.open");
-  if (openOv) closeOverlay(openOv);
-  if ($("#cartDrawer").classList.contains("open")) closeCart();
-  const mm = $("#mobileMenu"); if (!mm.hidden) { mm.hidden = true; $("#hamburger").setAttribute("aria-expanded","false"); }
+
+// IntersectionObserver → live-sync nav underline + rail dots
+if ("IntersectionObserver" in window && scroller){
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(entry => { if (entry.isIntersecting) setActiveSection(entry.target.id); });
+  }, { root: scroller, threshold: 0.55 });
+  sections.forEach(s => s && io.observe(s));
+}
+
+// Scroll progress line at the very top
+function updateProgress(){
+  const max = scroller ? scroller.scrollHeight - scroller.clientHeight : 0;
+  const p = max > 0 ? (scroller.scrollTop / max) * 100 : 0;
+  $("#progressLine").style.width = p + "%";
+}
+scroller?.addEventListener("scroll", updateProgress, { passive: true });
+updateProgress();
+
+// Keyboard: ArrowUp / ArrowDown / PageUp / PageDown / Home / End
+let lastKeyNav = 0;
+window.addEventListener("keydown", e => {
+  if (e.key === "Escape"){ closeCart(); closeMobileMenu(); return; }
+  const t = e.target;
+  if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+  if ($("#cartDrawer").classList.contains("open")) return; // arrows belong to the drawer
+  const keys = { ArrowDown:+1, PageDown:+1, ArrowUp:-1, PageUp:-1 };
+  let delta = keys[e.key];
+  if (e.key === "Home"){ delta = null; e.preventDefault(); return goTo("home"); }
+  if (e.key === "End"){ delta = null; e.preventDefault(); return goTo("contact"); }
+  if (delta === undefined || delta === null) return;
+  const now = Date.now();
+  if (now - lastKeyNav < 420) return;   // let the smooth snap land first
+  lastKeyNav = now;
+  e.preventDefault();
+  const currentIndex = SECTION_IDS.findIndex(id => {
+    const el = document.getElementById(id);
+    return el && Math.abs(el.offsetTop - scroller.scrollTop) < scroller.clientHeight / 2;
+  });
+  const base = currentIndex === -1 ? 0 : currentIndex;
+  const next = Math.min(SECTION_IDS.length - 1, Math.max(0, base + delta));
+  goTo(SECTION_IDS[next]);
 });
 
-/* ═════════ Mobile menu ═════════ */
+/* ═════════ Mobile menu ══════════ */
 const hamburger = $("#hamburger"), mobileMenu = $("#mobileMenu");
+function closeMobileMenu(){ mobileMenu.hidden = true; hamburger.setAttribute("aria-expanded","false"); }
 hamburger.addEventListener("click", () => {
   const willOpen = mobileMenu.hidden;
   mobileMenu.hidden = !willOpen;
   hamburger.setAttribute("aria-expanded", String(willOpen));
 });
 
-/* ═════════ Cart (localStorage-persisted, resilient to private mode / file://) ═════════ */
+/* ══════════════════════════════════════════════════════════
+   HORIZONTAL SNAP CAROUSELS (arrows + edge dimming)
+   ══════════════════════════════════════════════════════════ */
+function wireCarousel(trackId, prevId, nextId){
+  const track = $(trackId), prev = $(prevId), next = $(nextId);
+  if (!track || !prev || !next) return;
+  const step = () => Math.max(260, Math.round(track.clientWidth * 0.72));
+  prev.addEventListener("click", () => track.scrollBy({ left: -step(), behavior: "smooth" }));
+  next.addEventListener("click", () => track.scrollBy({ left:  step(), behavior: "smooth" }));
+  const refresh = () => {
+    const maxScroll = track.scrollWidth - track.clientWidth - 4;
+    prev.classList.toggle("is-dim", track.scrollLeft <= 4);
+    next.classList.toggle("is-dim", track.scrollLeft >= maxScroll);
+  };
+  track.addEventListener("scroll", refresh, { passive: true });
+  window.addEventListener("resize", refresh);
+  refresh();
+}
+wireCarousel("#serviceTrack", "#servicesPrev", "#servicesNext");
+wireCarousel("#productTrack", "#storePrev", "#storeNext");
+
+/* ═════════ Cart (localStorage-persisted, private-mode safe) ═════════ */
 const CART_KEY = "dd_cart_v1";
 const storage = {
   get(){ try { return JSON.parse(localStorage.getItem(CART_KEY) || "[]"); } catch { return []; } },
-  set(v){ try { localStorage.setItem(CART_KEY, JSON.stringify(v)); } catch { /* storage unavailable — cart still works in memory */ } },
+  set(v){ try { localStorage.setItem(CART_KEY, JSON.stringify(v)); } catch { /* in-memory only */ } },
 };
 let cart = storage.get();
 const saveCart = () => storage.set(cart);
@@ -155,9 +216,10 @@ const cartQty   = () => cart.reduce((n, i) => n + i.qty, 0);
 const cartTotal = () => cartItems().reduce((n, i) => n + i.qty * i.product.price, 0);
 
 function renderCart(){
-  const badge = $("#cartBadge");
-  badge.textContent = cartQty();
-  $("#cartCountLabel").textContent = `${cartQty()} item${cartQty() === 1 ? "" : "s"}`;
+  const qty = cartQty(), total = cartTotal();
+  $("#cartBadge").textContent = qty;
+  $("#cartCountLabel").textContent = `${qty} item${qty === 1 ? "" : "s"}`;
+  $("#cartSummaryText").textContent = `${qty} item${qty === 1 ? "" : "s"} · ${fmtINR(total)}`;
 
   const wrap = $("#cartItems"), empty = $("#cartEmpty"), foot = $("#cartFoot");
   const items = cartItems();
@@ -166,7 +228,7 @@ function renderCart(){
 
   wrap.innerHTML = items.map(({ product: p, qty }) => `
     <div class="cart-item">
-      <img src="${p.img}" alt="${p.name}" width="78" height="78" />
+      <img src="${p.img}" alt="${p.name}" width="74" height="74" />
       <div class="ci-body">
         <div class="ci-name">${p.name}</div>
         <div class="ci-price">${fmtINR(p.price)} × ${qty} = ${fmtINR(p.price * qty)}</div>
@@ -181,7 +243,6 @@ function renderCart(){
       </div>
     </div>`).join("");
 
-  const total = cartTotal();
   $("#cartTotal").textContent = fmtINR(total);
   $("#deliveryNote").textContent = total >= FREE_DELIVERY_AT ? "FREE — nice!" : `₹49 (free above ${fmtINR(FREE_DELIVERY_AT)})`;
 
@@ -199,10 +260,8 @@ function addToCart(id){
   const found = cart.find(i => i.id === id);
   if (found) found.qty += 1; else cart.push({ id, qty: 1 });
   saveCart(); renderCart();
-
   const badge = $("#cartBadge");
   badge.classList.remove("pop"); void badge.offsetWidth; badge.classList.add("pop");
-
   const p = PRODUCTS.find(x => x.id === id);
   showToast(`<b>${p.name}</b> added to your cart`);
 }
@@ -214,7 +273,7 @@ function changeQty(id, delta){
 }
 function removeFromCart(id){ cart = cart.filter(i => i.id !== id); saveCart(); renderCart(); }
 
-storeGrid.addEventListener("click", e => {
+$("#productTrack").addEventListener("click", e => {
   const btn = e.target.closest("[data-add]"); if (!btn) return;
   addToCart(btn.dataset.add);
 });
@@ -224,14 +283,13 @@ $("#cartItems").addEventListener("click", e => {
   const rem = e.target.closest("[data-remove]"); if (rem) return removeFromCart(rem.dataset.remove);
 });
 
-/* cart drawer open/close */
 const cartDrawer = $("#cartDrawer");
 function openCart(){ cartDrawer.classList.add("open"); cartDrawer.setAttribute("aria-hidden","false"); $("#cartClose").focus(); }
 function closeCart(){ cartDrawer.classList.remove("open"); cartDrawer.setAttribute("aria-hidden","true"); }
 $("#cartOpen").addEventListener("click", openCart);
 $("#cartClose").addEventListener("click", closeCart);
+$("#cartSummary").addEventListener("click", openCart);
 
-/* place order → WhatsApp with prefilled message */
 $("#placeOrder").addEventListener("click", () => {
   const items = cartItems(); if (!items.length) return;
   const total = cartTotal();
@@ -254,7 +312,7 @@ $("#placeOrder").addEventListener("click", () => {
 $("#callForm").addEventListener("submit", e => {
   e.preventDefault();
   const name = $("#f-name"), need = $("#f-need"), budget = $("#f-budget"), msg = $("#f-msg");
-  if (!name.value.trim()) { name.focus(); showToast("Please tell me your name 🙂"); return; }
+  if (!name.value.trim()) { name.focus(); showToast("Please tell me your name"); return; }
   if (!need.value)        { need.focus(); showToast("Please choose what you need"); return; }
   const text = [
     `Hi ${SITE.brand}! I'm ${name.value.trim()}.`,
