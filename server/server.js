@@ -9,19 +9,35 @@
 const path    = require("path");
 const fs      = require("fs");
 const crypto  = require("crypto");
+const os      = require("os");
 const express = require("express");
 const { DatabaseSync } = require("node:sqlite");
 
 const ROOT = path.join(__dirname, "..");
 const DATA_DIR = path.join(ROOT, "data");
 fs.mkdirSync(DATA_DIR, { recursive: true });
-const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, "site.db");
 const PORT    = process.env.PORT || 8000;
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
 
+/* ════════════════ INSTALL / DB RESOLUTION ════════════════
+   Precedence: env DB_PATH → data/install.json (written by the /setup.html
+   wizard) → default data/site.db. */
+const INSTALL_FILE = path.join(DATA_DIR, "install.json");
+const readInstall  = () => { try { return JSON.parse(fs.readFileSync(INSTALL_FILE, "utf8")) || {}; } catch { return {}; } };
+const writeInstall = (obj) => { try { fs.writeFileSync(INSTALL_FILE, JSON.stringify(obj, null, 2)); } catch (e) { console.warn("[install] could not persist install.json:", e.message); } };
+const resolveDbTarget = (p) => {
+  let s = String(p || "").trim() || path.join(DATA_DIR, "site.db");
+  if (s.startsWith("~")) s = path.join(process.env.HOME || "/", s.slice(1));
+  const abs = path.isAbsolute(s) ? path.normalize(s) : path.resolve(ROOT, s);
+  if (abs.includes("\0")) throw Object.assign(new Error("Invalid path"), { status: 400 });
+  return abs;
+};
+const ENV_DB_PATH   = process.env.DB_PATH ? resolveDbTarget(process.env.DB_PATH) : null;
+let currentDbPath   = ENV_DB_PATH || readInstall().dbPath || path.join(DATA_DIR, "site.db");
+
 /* ════════════════ DATABASE ════════════════ */
-const db = new DatabaseSync(DB_PATH);
-db.exec(`
+let db = null;
+const ensureSchema = () => db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT NOT NULL,
@@ -110,165 +126,184 @@ CREATE INDEX IF NOT EXISTS idx_reviews_product  ON reviews(product_id);
 `);
 
 /* ── migrations for databases created before the storefront build ── */
-const _cols = (tbl) => db.prepare(`PRAGMA table_info(${tbl})`).all().map(r => r.name);
-if (!_cols("products").includes("reviews"))   db.exec("ALTER TABLE products ADD COLUMN reviews INTEGER NOT NULL DEFAULT 0");
-if (!_cols("orders").includes("payment"))     db.exec("ALTER TABLE orders ADD COLUMN payment TEXT NOT NULL DEFAULT 'cod'");
-if (!_cols("orders").includes("coupon_code")) db.exec("ALTER TABLE orders ADD COLUMN coupon_code TEXT NOT NULL DEFAULT ''");
-if (!_cols("orders").includes("discount"))    db.exec("ALTER TABLE orders ADD COLUMN discount INTEGER NOT NULL DEFAULT 0");
+const runMigrations = () => {
+  const _cols = (tbl) => db.prepare(`PRAGMA table_info(${tbl})`).all().map(r => r.name);
+  if (!_cols("products").includes("reviews"))   db.exec("ALTER TABLE products ADD COLUMN reviews INTEGER NOT NULL DEFAULT 0");
+  if (!_cols("orders").includes("payment"))     db.exec("ALTER TABLE orders ADD COLUMN payment TEXT NOT NULL DEFAULT 'cod'");
+  if (!_cols("orders").includes("coupon_code")) db.exec("ALTER TABLE orders ADD COLUMN coupon_code TEXT NOT NULL DEFAULT ''");
+  if (!_cols("orders").includes("discount"))    db.exec("ALTER TABLE orders ADD COLUMN discount INTEGER NOT NULL DEFAULT 0");
+};
+const openDb = (p) => { const nd = new DatabaseSync(p); db = nd; ensureSchema(); runMigrations(); };
+openDb(currentDbPath);
 
-/* ════════════════ SEED (idempotent) ════════════════ */
 const hashPw = (pw, salt) => crypto.scryptSync(pw, salt, 64).toString("hex");
 const mkUser = (name, email, phone, password, role) => {
   const salt = crypto.randomBytes(16).toString("hex");
   db.prepare("INSERT INTO users (name,email,phone,password_hash,password_salt,role) VALUES (?,?,?,?,?,?)")
     .run(name, email.toLowerCase(), phone, hashPw(password, salt), salt, role);
 };
-
 const adminEmail = (process.env.ADMIN_EMAIL || "admin@debasishdas.in").toLowerCase();
 const adminPw    = process.env.ADMIN_PASSWORD || "admin123";
-
-if (!db.prepare("SELECT 1 FROM users WHERE email = ?").get(adminEmail)) {
-  mkUser("Debasish Das", adminEmail, "+91 00000 00000", adminPw, "admin");
-  console.log(`[seed] admin created → ${adminEmail}`);
-}
-if (!db.prepare("SELECT 1 FROM users WHERE email = ?").get("rohit@demo.in")) {
-  mkUser("Rohit Sharma", "rohit@demo.in", "+91 98765 01020", "customer123", "user");
-}
-
-const SEED_PRODUCTS = [
-  ["p1","Ergo Wireless Mouse","2.4GHz + Bluetooth · 3 modes","Tech",499,799,4.6,40,"assets/img/product-mouse.jpg",483],
-  ["p2","Luma LED Desk Lamp","3 light tones · USB charge port","Home & Living",899,1299,4.8,32,"assets/img/product-lamp.jpg",391],
-  ["p3","USB-C 6-in-1 Hub 100W","4K HDMI · PD 100W · SD reader","Tech",1299,1799,4.5,25,"assets/img/product-hub.jpg",512],
-  ["p4","Terra Bluetooth Speaker","12h playtime · TWS pairing","Tech",1499,2199,4.7,18,"assets/img/product-speaker.jpg",428],
-  ["p5","Speckled Ceramic Mug","350 ml · handmade · microwave safe","Home & Living",349,499,4.9,60,"assets/img/product-mug.jpg",607],
-  ["p6","Walnut Desk Organiser","Solid walnut · phone + pen slots","Home & Living",749,1099,4.8,4,"assets/img/product-organizer.jpg",214],
-  ["p7","Aura TKL Keyboard 68","Tri-mode · linear red switches","Tech",1999,2499,4.7,12,"assets/img/product-keyboard.jpg",356],
-  ["p8","Copper Hammered Bottle","750 ml · 99.9% pure copper","Home & Living",799,1199,4.8,3,"assets/img/product-bottle.jpg",289],
-  ["p9","Arc Brass Desk Clock","Silent sweep movement · walnut base","Home & Living",899,1199,4.7,22,"assets/img/product-clock.jpg",173],
-  ["p10","Terracotta Herb Planter","Handmade · with saucer · drainage hole","Home & Living",449,599,4.6,35,"assets/img/product-planter.jpg",141],
-  ["p11","Sage Linen Cushion 18″","Washed linen · hidden zip · feather-touch","Home & Living",349,499,4.5,48,"assets/img/product-cushion.jpg",198],
-  ["p12","Amber Ceramic Candle","Soy wax · sandalwood & vanilla · 40h burn","Home & Living",299,399,4.8,40,"assets/img/product-candle.jpg",263],
-  ["p13","Magnetic Desk Cable Dock","Anodised aluminium · 3 cable slots","Tech",549,799,4.4,52,"assets/img/product-dock.jpg",187],
-  ["p14","Bamboo Wireless Charger","15W fast charge · phone stand · Qi certified","Tech",699,999,4.6,29,"assets/img/product-charger.jpg",235],
-];
-if (db.prepare("SELECT COUNT(*) AS n FROM products").get().n === 0) {
-  const ins = db.prepare("INSERT INTO products (id,name,meta,tag,price,was,rating,stock,img,reviews) VALUES (?,?,?,?,?,?,?,?,?,?)");
-  for (const p of SEED_PRODUCTS) ins.run(...p);
-  console.log("[seed] 14 products inserted");
-} else {
-  // existing DBs: backfill the review counts for the seeded catalogue
-  const bf = db.prepare("UPDATE products SET reviews = ? WHERE id = ? AND reviews = 0");
-  for (const p of SEED_PRODUCTS) bf.run(p[9], p[0]);
-}
-
-/* ── store settings + coupons (seeded once, admin-editable) ── */
-const DEFAULT_SETTINGS = {
-  announce:      "Free delivery over ₹999 ✦ 7-day easy returns ✦ COD & UPI on delivery",
-  free_at:       "999",
-  deliver_fee:   "49",
-  cod_enabled:   "1",
-  cod_min:       "0",
-  max_qty:       "99",
-  store_live:    "1",
-  featured_ids:  '["p1","p4","p7","p2"]',
-};
+  const DEFAULT_SETTINGS = {
+    announce:      "Free delivery over ₹999 ✦ 7-day easy returns ✦ COD & UPI on delivery",
+    free_at:       "999",
+    deliver_fee:   "49",
+    cod_enabled:   "1",
+    cod_min:       "0",
+    max_qty:       "99",
+    store_live:    "1",
+    featured_ids:  '["p1","p4","p7","p2"]',
+  };
 const getSetting = (k) => {
   const row = db.prepare("SELECT value FROM store_settings WHERE key = ?").get(k);
   return row ? row.value : DEFAULT_SETTINGS[k];
 };
 const setSetting = (k, v) => db.prepare("INSERT INTO store_settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(k, String(v));
-for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
-  if (!db.prepare("SELECT 1 FROM store_settings WHERE key = ?").get(k)) setSetting(k, v);
-}
 
-if (db.prepare("SELECT COUNT(*) AS n FROM coupons").get().n === 0) {
-  const idc = db.prepare("INSERT INTO coupons (code,type,value,min_order,max_uses) VALUES (?,?,?,?,?)");
-  idc.run("WELCOME10", "percent", 10, 0,   0);
-  idc.run("FLAT100",   "flat",    100, 999, 0);
-  idc.run("SHELF150",  "flat",    150, 1499, 100);
-  console.log("[seed] coupons: WELCOME10 · FLAT100 · SHELF150");
-}
+/* ════════════════ SEED (idempotent) ════════════════ */
+const seedDatabase = ({ demo = true } = {}) => {
+  /* store_settings defaults are ALWAYS ensured; demo content only when demo=true */
+  try { setSetting("seed_intent", demo ? "demo" : "empty"); } catch {}
 
-/* ── sample reviews (seeded once; wiped by deleting data/site.db) ── */
-if (getSetting("reviews_seeded") !== "1") {
-  const sample = [
-    ["p1", [ ["Rohit Sharma", 5, "Daily driver, zero complaints", "Pairs with both my laptop and phone. Battery lasts forever and the scroll wheel is buttery."],
-             ["Ananya Iyer", 4, "Versatile but a bit light", "Three connection modes are genuinely useful. Would prefer a heavier shell for desk stability."],
-             ["Debasish Banerjee", 5, "Best mouse under ₹500", "I have used it 8 hours a day for 3 months. Zero double-click issues so far."] ] ],
-    ["p2", [ ["Megha Kulkarni", 5, "Perfect for late-night work", "The warm tone is easy on the eyes and the USB port charges my Kindle. Highly recommend."],
-             ["Suresh Pillai", 5, "Premium look", "Metal build, three brightness levels and a wobble-free base. Worth every rupee."],
-             ["Priya Nair", 4, "Very good, bright max", "Runs a bit bright on max for small desks — but the lowest tone is ideal for reading."] ] ],
-    ["p3", [ ["Arvind Menon", 5, "Desk setup sorted", "HDMI + 100W PD + SD reader — one cable to my monitor and the laptop charges. Elite hub."],
-             ["Kavya Deshmukh", 4, "Gets warm under load", "Works flawlessly. It warms up during long 4K transfers, nothing worrying."],
-             ["Rahul Verma", 4, "Great value", "PD pass-through is the killer feature. Packaging was solid."] ] ],
-    ["p4", [ ["Ishita Roy", 5, "Bass for days", "Paired two units for party stereo. 12h battery claim is accurate — charged once all weekend."],
-             ["Nikhil Joshi", 5, "Monsoon-proof sound", "Took it to a lake-side trip. IPX5 and still going strong."],
-             ["Sneha Kulkarni", 4, "Excellent for the price", "TWS pairing is a bit fiddly the first time, then it just works."] ] ],
-    ["p5", [ ["Tanvi Chopra", 5, "My morning ritual", "Handmade glaze is gorgeous, tea stays hot forever, microwave safe. Bought six for gifts."],
-             ["Rohit Sharma", 5, "Restaurant vibes at home", "350 ml is the perfect chai size. Will reorder in different colours."],
-             ["Divya Menon", 5, "Zero chips after months", "Daily office use for 4 months — no cracks, no glaze fade."] ] ],
-    ["p6", [ ["Arjun Malhotra", 5, "Desk candy", "Solid walnut, holds phone + pens + cards. Smells amazing. Build quality is heirloom grade."],
-             ["Pooja Rao", 4, "Beautiful but compact", "Smaller than expected — ideal for single-monitor setups. Craftsmanship is superb."],
-             ["Vikram Shetty", 5, "Gift-worthy", "Bought it as a gift, ended up keeping one for myself too."] ] ],
-    ["p7", [ ["Rohit Sharma", 5, "Creamy typing", "Linear reds are office-quiet, tri-mode works across PC + tablet + phone. 68 keys is the sweet spot."],
-             ["Ananya Iyer", 5, "Kept my old keyboard for nothing", "Sound profile is thocky out of the box. Stabilisers lubed well."],
-             ["Debasish Banerjee", 4, "Great board, dongle life", "One 2.4 GHz dongle, works perfectly. Bluetooth mode has slight lag for gaming."] ] ],
-    ["p8", [ ["Megha Kulkarni", 5, "Tradition, modern finish", "Hammered finish is stunning, water tastes noticeably fresher. Easy to hand-wash."],
-             ["Suresh Pillai", 4, "Heavy but worth it", "750 ml full copper is no joke on weight — but the temperature retention is unreal."],
-             ["Priya Nair", 5, "Daily ayurveda", "Using it for 6 months. Once a month a lemon-salt polish keeps it glowing."] ] ],
-    ["p9", [ ["Arvind Menon", 5, "Silent and classy", "Sweep second hand means zero tick noise. Walnut base matches my desk perfectly."],
-             ["Kavya Deshmukh", 4, "Accurate time", "Gained 2 seconds in a month. Looks way more expensive than it is."],
-             ["Rahul Verma", 5, "Vintage soul", "The brass patina is developing beautifully. 10/10 desk upgrade."] ] ],
-    ["p10", [ ["Ishita Roy", 5, "Basil is thriving", "Drainage hole + saucer, exactly as described. Herbs love this thing."],
-              ["Nikhil Joshi", 5, "Handmade charm", "No two are alike — mine has lovely texture. Packed with zero breakage."],
-              ["Sneha Kulkarni", 4, "Perfect size", "Ideal for kitchen herbs. Wish it came in a 10-inch variant too."] ] ],
-    ["p11", [ ["Tanvi Chopra", 5, "Softest cushion ever", "Washed linen is pre-distressed to perfection. Sage colour matches the photos exactly."],
-              ["Rohit Sharma", 4, "True to colour", "Feather-touch feel is real. The insert could be a touch firmer."],
-              ["Divya Menon", 5, "Sofa transformed", "Bought two. The hidden zip is invisible even up close."] ] ],
-    ["p12", [ ["Arjun Malhotra", 5, "Sandalwood heaven", "40-hour burn claim is real — mine is on week 3. Fills the living room, never overpowering."],
-              ["Pooja Rao", 5, "Date-night staple", "Vanilla-sandalwood blend is unisex and elegant. Dinner-party essential."],
-              ["Vikram Shetty", 4, "Lovely, wish for bigger jars", "Fragrance throw is excellent. Would love a 100-hour XL size."] ] ],
-    ["p13", [ ["Rohit Sharma", 5, "Bye-bye cable nest", "Three slots, magnetic pop-up ends, holds Lightning + USB-C + Watch. Desk finally looks adult."],
-              ["Ananya Iyer", 4, "Strong magnets", "Cables snap in satisfyingly. A hair lighter would be nice but stability is great."],
-              ["Debasish Banerjee", 4, "Minimal and useful", "Does exactly what it says. Anodised finish resists scratches."] ] ],
-    ["p14", [ ["Megha Kulkarni", 5, "Charging, standing", "15W fast charge works — phone goes 0→50% before my morning chai. Bamboo base is gorgeous."],
-              ["Suresh Pillai", 5, "Gift success", "Gave one to my dad; he uses it daily. Stand angle is perfect for video calls."],
-              ["Priya Nair", 4, "Case friendly", "Charges through my rugged case. Superb value for the price."] ] ],
+
+  if (!db.prepare("SELECT 1 FROM users WHERE email = ?").get(adminEmail)) {
+    mkUser("Debasish Das", adminEmail, "+91 00000 00000", adminPw, "admin");
+    console.log(`[seed] admin created → ${adminEmail}`);
+  }
+  if (demo && !db.prepare("SELECT 1 FROM users WHERE email = ?").get("rohit@demo.in")) {
+    mkUser("Rohit Sharma", "rohit@demo.in", "+91 98765 01020", "customer123", "user");
+  }
+
+  const SEED_PRODUCTS = [
+    ["p1","Ergo Wireless Mouse","2.4GHz + Bluetooth · 3 modes","Tech",499,799,4.6,40,"assets/img/product-mouse.jpg",483],
+    ["p2","Luma LED Desk Lamp","3 light tones · USB charge port","Home & Living",899,1299,4.8,32,"assets/img/product-lamp.jpg",391],
+    ["p3","USB-C 6-in-1 Hub 100W","4K HDMI · PD 100W · SD reader","Tech",1299,1799,4.5,25,"assets/img/product-hub.jpg",512],
+    ["p4","Terra Bluetooth Speaker","12h playtime · TWS pairing","Tech",1499,2199,4.7,18,"assets/img/product-speaker.jpg",428],
+    ["p5","Speckled Ceramic Mug","350 ml · handmade · microwave safe","Home & Living",349,499,4.9,60,"assets/img/product-mug.jpg",607],
+    ["p6","Walnut Desk Organiser","Solid walnut · phone + pen slots","Home & Living",749,1099,4.8,4,"assets/img/product-organizer.jpg",214],
+    ["p7","Aura TKL Keyboard 68","Tri-mode · linear red switches","Tech",1999,2499,4.7,12,"assets/img/product-keyboard.jpg",356],
+    ["p8","Copper Hammered Bottle","750 ml · 99.9% pure copper","Home & Living",799,1199,4.8,3,"assets/img/product-bottle.jpg",289],
+    ["p9","Arc Brass Desk Clock","Silent sweep movement · walnut base","Home & Living",899,1199,4.7,22,"assets/img/product-clock.jpg",173],
+    ["p10","Terracotta Herb Planter","Handmade · with saucer · drainage hole","Home & Living",449,599,4.6,35,"assets/img/product-planter.jpg",141],
+    ["p11","Sage Linen Cushion 18″","Washed linen · hidden zip · feather-touch","Home & Living",349,499,4.5,48,"assets/img/product-cushion.jpg",198],
+    ["p12","Amber Ceramic Candle","Soy wax · sandalwood & vanilla · 40h burn","Home & Living",299,399,4.8,40,"assets/img/product-candle.jpg",263],
+    ["p13","Magnetic Desk Cable Dock","Anodised aluminium · 3 cable slots","Tech",549,799,4.4,52,"assets/img/product-dock.jpg",187],
+    ["p14","Bamboo Wireless Charger","15W fast charge · phone stand · Qi certified","Tech",699,999,4.6,29,"assets/img/product-charger.jpg",235],
   ];
-  const ins = db.prepare("INSERT INTO reviews (product_id, user_id, name, rating, title, body) VALUES (?, NULL, ?, ?, ?, ?)");
-  db.exec("BEGIN");
-  try {
-    for (const [pid, rows] of sample) for (const [n, r, ttl, b] of rows) ins.run(pid, n, r, ttl, b);
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
+  if (demo && db.prepare("SELECT COUNT(*) AS n FROM products").get().n === 0) {
+    const ins = db.prepare("INSERT INTO products (id,name,meta,tag,price,was,rating,stock,img,reviews) VALUES (?,?,?,?,?,?,?,?,?,?)");
+    for (const p of SEED_PRODUCTS) ins.run(...p);
+    console.log("[seed] 14 products inserted");
+  } else {
+    // existing DBs: backfill the review counts for the seeded catalogue
+    const bf = db.prepare("UPDATE products SET reviews = ? WHERE id = ? AND reviews = 0");
+    for (const p of SEED_PRODUCTS) bf.run(p[9], p[0]);
   }
-  setSetting("reviews_seeded", "1");
-  console.log("[seed] sample reviews inserted");
-}
 
-if (db.prepare("SELECT COUNT(*) AS n FROM orders").get().n === 0) {
-  const cust = db.prepare("SELECT id FROM users WHERE email = 'rohit@demo.in'").get();
-  if (cust) {
-    const ins = db.prepare(`INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,status,created_at)
-                            VALUES (?,?,?,?,?,?,?,?,datetime('now', ?))`);
-    ins.run(cust.id, "Rohit Sharma", "+91 98765 01020", "14B, Gariahat Road, Kolkata 700029", "Call before delivery",
-            JSON.stringify([{id:"p3",name:"USB-C 6-in-1 Hub 100W",price:1299,qty:1},{id:"p1",name:"Ergo Wireless Mouse",price:499,qty:1}]),
-            1798, "delivered", "-9 days");
-    ins.run(cust.id, "Rohit Sharma", "+91 98765 01020", "14B, Gariahat Road, Kolkata 700029", "",
-            JSON.stringify([{id:"p4",name:"Terra Bluetooth Speaker",price:1499,qty:1}]),
-            1499, "shipped", "-2 days");
-    ins.run(cust.id, "Rohit Sharma", "+91 98765 01020", "14B, Gariahat Road, Kolkata 700029", "Gift wrap please",
-            JSON.stringify([{id:"p2",name:"Luma LED Desk Lamp",price:899,qty:1},{id:"p5",name:"Speckled Ceramic Mug",price:349,qty:2}]),
-            1597, "confirmed", "-6 hours");
-    console.log("[seed] 3 demo orders for rohit@demo.in");
+  /* ── store settings + coupons (seeded once, admin-editable) ── */
+  for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
+    if (!db.prepare("SELECT 1 FROM store_settings WHERE key = ?").get(k)) setSetting(k, v);
   }
-  if (!db.prepare("SELECT 1 FROM inquiries LIMIT 1").get()) {
-    db.prepare("INSERT INTO inquiries (name,phone,need,budget,message,created_at) VALUES (?,?,?,?,?,datetime('now','-1 day'))")
-      .run("Meera Iyer", "+91 98101 23456", "Business website design & development", "₹5,000 – ₹15,000", "Need a site for my boutique — catalogue + WhatsApp enquiry. 10-day deadline if possible.");
+
+  if (demo && db.prepare("SELECT COUNT(*) AS n FROM coupons").get().n === 0) {
+    const idc = db.prepare("INSERT INTO coupons (code,type,value,min_order,max_uses) VALUES (?,?,?,?,?)");
+    idc.run("WELCOME10", "percent", 10, 0,   0);
+    idc.run("FLAT100",   "flat",    100, 999, 0);
+    idc.run("SHELF150",  "flat",    150, 1499, 100);
+    console.log("[seed] coupons: WELCOME10 · FLAT100 · SHELF150");
   }
-}
+
+  /* ── sample reviews (seeded once; wiped by deleting data/site.db) ── */
+  if (demo && getSetting("reviews_seeded") !== "1") {
+    const sample = [
+      ["p1", [ ["Rohit Sharma", 5, "Daily driver, zero complaints", "Pairs with both my laptop and phone. Battery lasts forever and the scroll wheel is buttery."],
+               ["Ananya Iyer", 4, "Versatile but a bit light", "Three connection modes are genuinely useful. Would prefer a heavier shell for desk stability."],
+               ["Debasish Banerjee", 5, "Best mouse under ₹500", "I have used it 8 hours a day for 3 months. Zero double-click issues so far."] ] ],
+      ["p2", [ ["Megha Kulkarni", 5, "Perfect for late-night work", "The warm tone is easy on the eyes and the USB port charges my Kindle. Highly recommend."],
+               ["Suresh Pillai", 5, "Premium look", "Metal build, three brightness levels and a wobble-free base. Worth every rupee."],
+               ["Priya Nair", 4, "Very good, bright max", "Runs a bit bright on max for small desks — but the lowest tone is ideal for reading."] ] ],
+      ["p3", [ ["Arvind Menon", 5, "Desk setup sorted", "HDMI + 100W PD + SD reader — one cable to my monitor and the laptop charges. Elite hub."],
+               ["Kavya Deshmukh", 4, "Gets warm under load", "Works flawlessly. It warms up during long 4K transfers, nothing worrying."],
+               ["Rahul Verma", 4, "Great value", "PD pass-through is the killer feature. Packaging was solid."] ] ],
+      ["p4", [ ["Ishita Roy", 5, "Bass for days", "Paired two units for party stereo. 12h battery claim is accurate — charged once all weekend."],
+               ["Nikhil Joshi", 5, "Monsoon-proof sound", "Took it to a lake-side trip. IPX5 and still going strong."],
+               ["Sneha Kulkarni", 4, "Excellent for the price", "TWS pairing is a bit fiddly the first time, then it just works."] ] ],
+      ["p5", [ ["Tanvi Chopra", 5, "My morning ritual", "Handmade glaze is gorgeous, tea stays hot forever, microwave safe. Bought six for gifts."],
+               ["Rohit Sharma", 5, "Restaurant vibes at home", "350 ml is the perfect chai size. Will reorder in different colours."],
+               ["Divya Menon", 5, "Zero chips after months", "Daily office use for 4 months — no cracks, no glaze fade."] ] ],
+      ["p6", [ ["Arjun Malhotra", 5, "Desk candy", "Solid walnut, holds phone + pens + cards. Smells amazing. Build quality is heirloom grade."],
+               ["Pooja Rao", 4, "Beautiful but compact", "Smaller than expected — ideal for single-monitor setups. Craftsmanship is superb."],
+               ["Vikram Shetty", 5, "Gift-worthy", "Bought it as a gift, ended up keeping one for myself too."] ] ],
+      ["p7", [ ["Rohit Sharma", 5, "Creamy typing", "Linear reds are office-quiet, tri-mode works across PC + tablet + phone. 68 keys is the sweet spot."],
+               ["Ananya Iyer", 5, "Kept my old keyboard for nothing", "Sound profile is thocky out of the box. Stabilisers lubed well."],
+               ["Debasish Banerjee", 4, "Great board, dongle life", "One 2.4 GHz dongle, works perfectly. Bluetooth mode has slight lag for gaming."] ] ],
+      ["p8", [ ["Megha Kulkarni", 5, "Tradition, modern finish", "Hammered finish is stunning, water tastes noticeably fresher. Easy to hand-wash."],
+               ["Suresh Pillai", 4, "Heavy but worth it", "750 ml full copper is no joke on weight — but the temperature retention is unreal."],
+               ["Priya Nair", 5, "Daily ayurveda", "Using it for 6 months. Once a month a lemon-salt polish keeps it glowing."] ] ],
+      ["p9", [ ["Arvind Menon", 5, "Silent and classy", "Sweep second hand means zero tick noise. Walnut base matches my desk perfectly."],
+               ["Kavya Deshmukh", 4, "Accurate time", "Gained 2 seconds in a month. Looks way more expensive than it is."],
+               ["Rahul Verma", 5, "Vintage soul", "The brass patina is developing beautifully. 10/10 desk upgrade."] ] ],
+      ["p10", [ ["Ishita Roy", 5, "Basil is thriving", "Drainage hole + saucer, exactly as described. Herbs love this thing."],
+                ["Nikhil Joshi", 5, "Handmade charm", "No two are alike — mine has lovely texture. Packed with zero breakage."],
+                ["Sneha Kulkarni", 4, "Perfect size", "Ideal for kitchen herbs. Wish it came in a 10-inch variant too."] ] ],
+      ["p11", [ ["Tanvi Chopra", 5, "Softest cushion ever", "Washed linen is pre-distressed to perfection. Sage colour matches the photos exactly."],
+                ["Rohit Sharma", 4, "True to colour", "Feather-touch feel is real. The insert could be a touch firmer."],
+                ["Divya Menon", 5, "Sofa transformed", "Bought two. The hidden zip is invisible even up close."] ] ],
+      ["p12", [ ["Arjun Malhotra", 5, "Sandalwood heaven", "40-hour burn claim is real — mine is on week 3. Fills the living room, never overpowering."],
+                ["Pooja Rao", 5, "Date-night staple", "Vanilla-sandalwood blend is unisex and elegant. Dinner-party essential."],
+                ["Vikram Shetty", 4, "Lovely, wish for bigger jars", "Fragrance throw is excellent. Would love a 100-hour XL size."] ] ],
+      ["p13", [ ["Rohit Sharma", 5, "Bye-bye cable nest", "Three slots, magnetic pop-up ends, holds Lightning + USB-C + Watch. Desk finally looks adult."],
+                ["Ananya Iyer", 4, "Strong magnets", "Cables snap in satisfyingly. A hair lighter would be nice but stability is great."],
+                ["Debasish Banerjee", 4, "Minimal and useful", "Does exactly what it says. Anodised finish resists scratches."] ] ],
+      ["p14", [ ["Megha Kulkarni", 5, "Charging, standing", "15W fast charge works — phone goes 0→50% before my morning chai. Bamboo base is gorgeous."],
+                ["Suresh Pillai", 5, "Gift success", "Gave one to my dad; he uses it daily. Stand angle is perfect for video calls."],
+                ["Priya Nair", 4, "Case friendly", "Charges through my rugged case. Superb value for the price."] ] ],
+    ];
+    const ins = db.prepare("INSERT INTO reviews (product_id, user_id, name, rating, title, body) VALUES (?, NULL, ?, ?, ?, ?)");
+    db.exec("BEGIN");
+    try {
+      for (const [pid, rows] of sample) for (const [n, r, ttl, b] of rows) ins.run(pid, n, r, ttl, b);
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+    setSetting("reviews_seeded", "1");
+    console.log("[seed] sample reviews inserted");
+  }
+
+  if (demo && db.prepare("SELECT COUNT(*) AS n FROM orders").get().n === 0) {
+    const cust = db.prepare("SELECT id FROM users WHERE email = 'rohit@demo.in'").get();
+    if (cust) {
+      const ins = db.prepare(`INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,status,created_at)
+                              VALUES (?,?,?,?,?,?,?,?,datetime('now', ?))`);
+      ins.run(cust.id, "Rohit Sharma", "+91 98765 01020", "14B, Gariahat Road, Kolkata 700029", "Call before delivery",
+              JSON.stringify([{id:"p3",name:"USB-C 6-in-1 Hub 100W",price:1299,qty:1},{id:"p1",name:"Ergo Wireless Mouse",price:499,qty:1}]),
+              1798, "delivered", "-9 days");
+      ins.run(cust.id, "Rohit Sharma", "+91 98765 01020", "14B, Gariahat Road, Kolkata 700029", "",
+              JSON.stringify([{id:"p4",name:"Terra Bluetooth Speaker",price:1499,qty:1}]),
+              1499, "shipped", "-2 days");
+      ins.run(cust.id, "Rohit Sharma", "+91 98765 01020", "14B, Gariahat Road, Kolkata 700029", "Gift wrap please",
+              JSON.stringify([{id:"p2",name:"Luma LED Desk Lamp",price:899,qty:1},{id:"p5",name:"Speckled Ceramic Mug",price:349,qty:2}]),
+              1597, "confirmed", "-6 hours");
+      console.log("[seed] 3 demo orders for rohit@demo.in");
+    }
+    if (!db.prepare("SELECT 1 FROM inquiries LIMIT 1").get()) {
+      db.prepare("INSERT INTO inquiries (name,phone,need,budget,message,created_at) VALUES (?,?,?,?,?,datetime('now','-1 day'))")
+        .run("Meera Iyer", "+91 98101 23456", "Business website design & development", "₹5,000 – ₹15,000", "Need a site for my boutique — catalogue + WhatsApp enquiry. 10-day deadline if possible.");
+    }
+  }
+
+};
+
+/* boot: seed an entirely fresh database (fresh clones & first deploys).
+   An install that chose “empty store” in the wizard is never re-stocked with demo data. */
+try {
+  const fresh = db.prepare("SELECT COUNT(*) AS n FROM users").get().n === 0;
+  let intent = "";
+  try { const r = db.prepare("SELECT value FROM store_settings WHERE key = 'seed_intent'").get(); intent = r ? r.value : ""; } catch {}
+  if (fresh) seedDatabase({ demo: intent !== "empty" });
+} catch (e) { console.error("[seed]", e); }
 
 /* ════════════════ HELPERS ════════════════ */
 const app = express();
@@ -279,6 +314,16 @@ app.use((req, res, next) => {   // minimal security headers
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   next();
+});
+
+/* Fresh deploys: until the owner completes /setup.html, GETs hold at the wizard.
+   API, static assets, the wizard itself and robots/sitemap stay open. */
+const SETUP_FREE = [/^\/api\//, /^\/assets\//, /^\/setup\.html$/, /^\/favicon\.ico$/, /^\/robots\.txt$/, /^\/sitemap\.xml$/];
+app.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD") return next();
+  if (isSetupComplete()) return next();
+  if (SETUP_FREE.some(rx => rx.test(req.path))) return next();
+  return res.redirect(302, "/setup.html");
 });
 
 const parseCookies = (req) => {
@@ -603,13 +648,14 @@ app.post("/api/products/:id/reviews", requireAuth, asyncWrap(async (req, res) =>
 }));
 
 /* ════════════════ INVOICES (owner or admin only) ════════════════ */
+const siteGet = (k) => { try { const v = getSetting(k); return v === undefined || v === null ? "" : String(v); } catch { return ""; } };
 const sellerInfo = () => ({
-  name: "Debasish Das — Web Studio & Store",
-  line: process.env.SELLER_LINE || "Web design · Hosting · Handpicked store",
-  addr: process.env.SELLER_ADDR || "Kolkata, West Bengal 700001, India",
-  gstin: process.env.SELLER_GSTIN || "19ABCDE1234F1Z5 (sample)",
-  email: process.env.SELLER_EMAIL || "hello@example.com",
-  phone: process.env.SELLER_PHONE || "+91 00000 00000",
+  name: siteGet("site_brand") || "Debasish Das — Web Studio & Store",
+  line: siteGet("site_tagline") || process.env.SELLER_LINE || "Web design · Hosting · Handpicked store",
+  addr: siteGet("site_address") || process.env.SELLER_ADDR || "Kolkata, West Bengal 700001, India",
+  gstin: siteGet("site_gstin") || process.env.SELLER_GSTIN || "19ABCDE1234F1Z5 (sample)",
+  email: siteGet("site_email") || process.env.SELLER_EMAIL || "hello@example.com",
+  phone: siteGet("site_phone") || process.env.SELLER_PHONE || "+91 00000 00000",
 });
 
 app.get("/api/invoices/:id", requireAuth, (req, res) => {
@@ -795,12 +841,226 @@ app.get("/robots.txt", (req, res) => {
   res.send(`User-agent: *\nAllow: /\nDisallow: /admin.html\nDisallow: /dashboard.html\nDisallow: /invoice.html\nDisallow: /api/\n\nSitemap: ${base}/sitemap.xml\n`);
 });
 
+/* ════════════════ SETUP WIZARD (/setup.html) ════════════════ */
+const isSetupComplete = () => { try { return getSetting("setup_completed") === "1"; } catch { return false; } };
+const siteSettings = () => ({
+  brand: siteGet("site_brand"), tagline: siteGet("site_tagline"), address: siteGet("site_address"),
+  gstin: siteGet("site_gstin"), email: siteGet("site_email"), phone: siteGet("site_phone"), whatsapp: siteGet("site_whatsapp"),
+});
+const dbCounts = () => ({
+  users: db.prepare("SELECT COUNT(*) n FROM users").get().n,
+  products: db.prepare("SELECT COUNT(*) n FROM products").get().n,
+  orders: db.prepare("SELECT COUNT(*) n FROM orders").get().n,
+  reviews: db.prepare("SELECT COUNT(*) n FROM reviews").get().n,
+  coupons: db.prepare("SELECT COUNT(*) n FROM coupons").get().n,
+  inquiries: db.prepare("SELECT COUNT(*) n FROM inquiries").get().n,
+});
+const dbInfo = () => {
+  let size = null; try { size = fs.statSync(currentDbPath).size; } catch {}
+  return { engine: "SQLite (node:sqlite — built into Node, zero external services)",
+           path: currentDbPath, defaultPath: path.join(DATA_DIR, "site.db"), envLocked: !!ENV_DB_PATH, size, counts: dbCounts() };
+};
+const requireSetupOpen = (req, res, next) => {
+  if (!isSetupComplete()) return next();
+  const u = currentUser(req);
+  if (u && u.role === "admin") return next();
+  return res.status(403).json({ error: "Setup is already complete — sign in as admin to change these settings." });
+};
+const WIPE_TABLES = ["reviews", "orders", "sessions", "coupons", "inquiries", "products", "users", "store_settings"];
+const wipeAllTables = () => {   // used by the wizard's explicit “erase & reinstall”
+  db.exec("PRAGMA foreign_keys = OFF");
+  for (const t of WIPE_TABLES) db.prepare(`DELETE FROM ${t}`).run();
+  db.exec("PRAGMA foreign_keys = ON");
+  try { db.exec("VACUUM"); } catch {}
+};
+
+app.get("/api/setup/status", (req, res) => {
+  const installed = isSetupComplete();
+  const u = currentUser(req);
+  if (installed && (!u || u.role !== "admin")) return res.json({ installed: true });
+  res.json({ installed, completedAt: siteGet("setup_completed_at") || null, signedInAs: u ? { name: u.name, role: u.role } : null,
+             ...dbInfo(), settings: siteSettings(), store: storeConfig() });
+});
+
+app.post("/api/setup/test-db", requireSetupOpen, asyncWrap(async (req, res) => {
+  const target = resolveDbTarget(req.body?.path);
+  const existed = fs.existsSync(target);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  let test = null;
+  try {
+    test = new DatabaseSync(target);
+    const integ = Object.values(test.prepare("PRAGMA integrity_check").get())[0];
+    const has = (t) => !!test.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").get(t);
+    let counts = null;
+    if (has("users") && has("products")) {
+      counts = { users: test.prepare("SELECT COUNT(*) n FROM users").get().n,
+                 products: test.prepare("SELECT COUNT(*) n FROM products").get().n,
+                 orders: test.prepare("SELECT COUNT(*) n FROM orders").get().n };
+    }
+    test.close();
+    if (!existed) { try { fs.unlinkSync(target); } catch {} }   // test must not leave stray files
+    res.json({ ok: true, path: target, existed, counts, integrity: integ });
+  } catch (e) {
+    if (test) try { test.close(); } catch {}
+    if (!existed) { try { fs.unlinkSync(target); } catch {} }
+    res.status(400).json({ error: "Can't use that file as the site database: " + e.message });
+  }
+}));
+
+app.post("/api/setup/database", requireSetupOpen, asyncWrap(async (req, res) => {
+  const mode = req.body?.mode === "empty" ? "empty" : "demo";
+  const confirmReset = req.body?.confirmReset === true || req.body?.confirmReset === "true";
+  const target = resolveDbTarget(req.body?.path);
+  const sameFile = path.resolve(target) === path.resolve(currentDbPath);
+  if (sameFile) {
+    const n = dbCounts().users + dbCounts().products;
+    if (n > 0 && mode === "empty" && !confirmReset) return res.status(409).json({ error: "That database already holds data — tick “erase existing data” to wipe and reinstall.", needsReset: true, counts: dbCounts() });
+    if (n > 0 && confirmReset) wipeAllTables();
+    if (n === 0 || confirmReset) seedDatabase({ demo: mode === "demo" });
+    return res.json({ ok: true, path: currentDbPath, seeded: (n === 0 || confirmReset) ? mode : "kept-existing", counts: dbCounts() });
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const test = new DatabaseSync(target);   // creates/validates the file
+  const had = !!test.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'users'").get();
+  let n = 0;
+  if (had) { try { n = test.prepare("SELECT COUNT(*) n FROM users").get().n + test.prepare("SELECT COUNT(*) n FROM products").get().n; } catch {} }
+  test.close();
+  if (n > 0 && mode === "empty" && !confirmReset) return res.status(409).json({ error: "That database already holds data — tick “erase existing data” to wipe and reinstall.", needsReset: true, counts: null });
+  try { db.close(); } catch {}
+  currentDbPath = target;
+  openDb(currentDbPath);
+  if (n > 0) wipeAllTables();
+  if (n === 0 || confirmReset) seedDatabase({ demo: mode === "demo" });
+  writeInstall({ dbPath: currentDbPath });
+  res.json({ ok: true, path: currentDbPath, seeded: (n === 0 || confirmReset) ? mode : "kept-existing", counts: dbCounts() });
+}));
+
+app.post("/api/setup/site", requireSetupOpen, (req, res) => {
+  const b = req.body || {};
+  const clean = (v, max) => String(v ?? "").trim().slice(0, max);
+  if (b.brand !== undefined)    setSetting("site_brand", clean(b.brand, 80));
+  if (b.tagline !== undefined)  setSetting("site_tagline", clean(b.tagline, 140));
+  if (b.address !== undefined)  setSetting("site_address", clean(b.address, 160));
+  if (b.gstin !== undefined)    setSetting("site_gstin", clean(b.gstin, 32));
+  if (b.email !== undefined) {
+    const e = clean(b.email, 120);
+    if (e && !emailOk(e)) return res.status(400).json({ error: "That email looks invalid" });
+    setSetting("site_email", e);
+  }
+  if (b.phone !== undefined)    setSetting("site_phone", clean(b.phone, 32));
+  if (b.whatsapp !== undefined) setSetting("site_whatsapp", clean(b.whatsapp, 20).replace(/\D/g, ""));
+  res.json({ ok: true, settings: siteSettings() });
+});
+
+app.post("/api/setup/admin", requireSetupOpen, asyncWrap(async (req, res) => {
+  const b = req.body || {};
+  const name  = String(b.name || "").trim().slice(0, 80) || "Site Admin";
+  const email = String(b.email || "").trim().toLowerCase().slice(0, 120);
+  const password = String(b.password || "");
+  const phone = String(b.phone || "").trim().slice(0, 32);
+  if (!emailOk(email)) return res.status(400).json({ error: "Enter a valid admin email" });
+  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+  if (password.length > 100) return res.status(400).json({ error: "Password too long" });
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = hashPw(password, salt);
+  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+  const { dd_sid } = parseCookies(req);
+  if (existing) {
+    db.prepare("UPDATE users SET name=?, phone=?, password_hash=?, password_salt=?, role='admin' WHERE id=?").run(name, phone, hash, salt, existing.id);
+    db.prepare("DELETE FROM sessions WHERE user_id = ? AND token <> ?").run(existing.id, dd_sid || "");
+  } else {
+    db.prepare("INSERT INTO users (name,email,phone,password_hash,password_salt,role) VALUES (?,?,?,?,?, 'admin')").run(name, email, phone, hash, salt);
+  }
+  res.json({ ok: true, email, updated: !!existing });
+}));
+
+app.post("/api/setup/store", requireSetupOpen, (req, res) => {
+  const b = req.body || {};
+  const boolish = (v) => (v === true || v === "true" || v === 1 || v === "1") ? "1" : "0";
+  const num = (v, min, max, fallback) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? String(Math.min(max, Math.max(min, n))) : String(fallback); };
+  if (b.announce !== undefined)    setSetting("announce", String(b.announce).trim().slice(0, 140) || DEFAULT_SETTINGS.announce);
+  if (b.freeAt !== undefined)      setSetting("free_at",     num(b.freeAt, 0, 100000, 999));
+  if (b.deliveryFee !== undefined) setSetting("deliver_fee", num(b.deliveryFee, 0, 1000, 49));
+  if (b.codEnabled !== undefined)  setSetting("cod_enabled", boolish(b.codEnabled));
+  if (b.codMin !== undefined)      setSetting("cod_min",     num(b.codMin, 0, 100000, 0));
+  if (b.maxQty !== undefined)      setSetting("max_qty",     num(b.maxQty, 1, 99, 99));
+  if (b.storeLive !== undefined)   setSetting("store_live",  boolish(b.storeLive));
+  res.json({ ok: true, config: storeConfig() });
+});
+
+app.post("/api/setup/complete", requireSetupOpen, (req, res) => {
+  setSetting("setup_completed", "1");
+  setSetting("setup_completed_at", new Date().toISOString());
+  res.json({ ok: true });
+});
+
+app.get("/setup.html", (req, res) => {
+  if (isSetupComplete() && currentUser(req)?.role !== "admin") return res.redirect(302, "/login.html?next=/setup.html");
+  res.sendFile(path.join(ROOT, "setup.html"));
+});
+
+app.get("/api/admin/backup", requireAdmin, (req, res) => {
+  const tmp = path.join(os.tmpdir(), `mysite-backup-${Date.now()}.db`);
+  try { db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`); }
+  catch (e) { return res.status(500).json({ error: "Backup failed: " + e.message }); }
+  res.download(tmp, `mysite-backup-${new Date().toISOString().slice(0, 10)}.db`, () => { try { fs.unlinkSync(tmp); } catch {} });
+});
+
+app.post("/api/admin/restore", requireAdmin, express.raw({ type: () => true, limit: "40mb" }), asyncWrap(async (req, res) => {
+  const buf = req.body;
+  if (!Buffer.isBuffer(buf) || buf.length < 100) return res.status(400).json({ error: "Empty or unreadable upload — pick the .db backup file." });
+  if (buf.subarray(0, 16).toString("latin1") !== "SQLite format 3\u0000") return res.status(400).json({ error: "That file is not a SQLite database." });
+  const target = currentDbPath;
+  const backup = `${target}.bak-${Date.now()}`;
+  try { fs.copyFileSync(target, backup); } catch (e) { return res.status(500).json({ error: "Could not snapshot the current database first: " + e.message }); }
+  try { db.close(); } catch {}
+  const tmpFile = `${target}.restore-tmp`;
+  fs.writeFileSync(tmpFile, buf);
+  try {
+    const test = new DatabaseSync(tmpFile);
+    const integ = Object.values(test.prepare("PRAGMA integrity_check").get())[0];
+    const ok = test.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'users'").get();
+    test.close();
+    if (!ok || integ !== "ok") throw new Error("missing required schema or failed integrity check");
+    fs.renameSync(tmpFile, target);
+  } catch (e) {
+    try { fs.copyFileSync(backup, target); } catch {}
+    try { fs.unlinkSync(tmpFile); } catch {}
+    openDb(target);
+    return res.status(400).json({ error: "Restore rolled back — " + e.message });
+  }
+  openDb(target);
+  res.json({ ok: true, counts: dbCounts(), backup: path.basename(backup) });
+}));
+
 /* ════════════════ STATIC SITE ════════════════ */
 /* Never serve the database, server source, or anything sensitive. */
 const STATIC_BLOCK = [/^\/data(\/|$)/i, /^\/server(\/|$)/i, /^\/node_modules(\/|$)/i, /^\/package(-lock)?\.json$/i, /^\/README\.md$/i];
 app.use((req, res, next) => {
   if (STATIC_BLOCK.some(rx => rx.test(req.path))) return res.status(404).send("Not found");
   next();
+});
+
+/* JS assets get the same contact-placeholder substitution as the HTML pages,
+   so runtime-built links (wa.me/…, mailto:) follow the setup wizard too. */
+const jsCache = new Map();
+app.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD") return next();
+  if (!/^\/assets\/js\/[\w.-]+\.js$/.test(req.path)) return next();
+  let src = jsCache.get(req.path);
+  if (src === undefined) {
+    try { src = fs.readFileSync(path.join(ROOT, req.path), "utf8"); jsCache.set(req.path, src); } catch { return next(); }
+  }
+  let out = src;
+  const wa = siteGet("site_whatsapp").replace(/\D/g, "");
+  const se = siteGet("site_email");
+  const sp = siteGet("site_phone");
+  if (wa) out = out.split("910000000000").join(wa);
+  if (se) out = out.split("hello@example.com").join(se);
+  if (sp) out = out.split("+91 00000 00000").join(sp);
+  res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(out);
 });
 
 /* HTML pages get __BASE__ tokens resolved to the request origin (OG/canonical URLs) */
@@ -817,9 +1077,16 @@ app.use((req, res, next) => {
     try { html = fs.readFileSync(path.join(ROOT, file), "utf8"); pageCache.set(file, html); } catch { return next(); }
   }
   const base = `${req.protocol}://${req.get("host")}`;
+  let out = html.split("__BASE__").join(base);
+  const wa = siteGet("site_whatsapp").replace(/\D/g, "");
+  const se = siteGet("site_email");
+  const sp = siteGet("site_phone");
+  if (wa) out = out.split("910000000000").join(wa);
+  if (se) out = out.split("hello@example.com").join(se);
+  if (sp) out = out.split("+91 00000 00000").join(sp);
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");
-  res.send(html.split("__BASE__").join(base));
+  res.send(out);
 });
 
 app.use(express.static(ROOT, {

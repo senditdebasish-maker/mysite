@@ -2,7 +2,9 @@
 
 Full-page **scroll-snap** home page **plus a working full-stack shop & account system**:
 customer accounts, order tracking, an admin dashboard, a lead inbox — all backed by a
-real SQLite database and session auth.
+real SQLite database and session auth. Fresh deploys are configured from the browser
+with a **first-run setup wizard** at `/setup.html` (database, brand, seller identity,
+admin account, storefront rules, backups) — no file editing required.
 
 ```
 Browser ──► Express (server/server.js) ──► SQLite (data/site.db, auto-created & seeded)
@@ -21,8 +23,15 @@ npm start
 # → http://localhost:8000
 ```
 
+**First run on a fresh machine:** every page redirects to **`/setup.html`** — the setup
+wizard. Pick *Demo catalogue* or *Empty store*, save your brand/GSTIN/contact details,
+create the admin account, then **Complete setup**. The site opens and the wizard locks
+behind the admin login. (A brand-new `data/site.db` is pre-seeded with the demo catalogue,
+so picking “Demo catalogue” just keeps it.)
+
 The SQLite database is created and seeded automatically on first run
-(`data/site.db` — git-ignored). Delete it any time to reseed the demo data.
+(`data/site.db` — git-ignored). Delete it any time to reseed the demo data
+(the setup wizard will run again).
 
 ### Demo logins
 
@@ -48,6 +57,7 @@ ADMIN_EMAIL=me@studio.in ADMIN_PASSWORD='a-strong-password' npm start
 | `/store.html`    | **The Shelf** — enterprise storefront: announcement bar, Today’s Deals rail with midnight countdown, category/price facets, instant search, sort, quick view, wishlist, coupons, COD & UPI on delivery, GST-inclusive totals |
 | `/product/<id>` | **Product pages** (canonical, server-rendered SEO) — `/product/p5` etc.: gallery zoom, specs, highlights, FBT bundle, “frequently bought together” add, same-category reco rail, ratings & written reviews, review form for signed-in customers, breadcrumb, OG/Twitter tags + Product JSON-LD injected per request |
 | `/invoice.html` | **GST tax invoice** — printable A4 invoice per order (owner or admin only); amount in words, 18% GST-inclusive split, seller GSTIN block, “computer-generated” terms |
+| `/setup.html`   | **First-run setup wizard** (locks to admins after completion) — database location & connection test, demo/empty install, brand & seller identity (GSTIN, WhatsApp, email), admin account, storefront rules, backup/restore |
 | `/contact.html`  | **Book a free call** — WhatsApp/call/email channels + brief form (saves to admin Leads) |
 | `/login.html`   | Split-screen sign in / create account (tabs, demo-creds autofill) |
 | `/dashboard.html` | **Customer dashboard** — My Orders with live status stepper, reorder, profile edit |
@@ -83,6 +93,8 @@ GET  /api/invoices/<orderId>             (owner or admin — printable GST invoi
 POST /api/coupons/validate               (public: code + basket subtotal → discount)
 POST /api/orders                         GET /api/my/orders
 GET  /sitemap.xml   GET /robots.txt
+GET  /api/setup/status               (public: install state; full details for admins / pre-setup)
+POST /api/setup/test-db|database|site|admin|store|complete   (open until setup completes, then admin-only)
 POST /api/inquiries                      (public, from the contact form)
 ── admin only ───────────────────────────────────────────────
 GET  /api/admin/stats      GET/PUT  /api/admin/orders[/:id/status]
@@ -91,6 +103,7 @@ GET  /api/admin/customers  GET /api/admin/inquiries
 GET/PUT /api/admin/store-config           (announcement, free-delivery, COD rules, live toggle, featured ids)
 GET/POST/PUT/DELETE /api/admin/coupons[/:code]   (PUT toggles active)
 GET  /api/admin/report                    (14-day revenue, top products, payment mix, coupon usage, AOV)
+GET  /api/admin/backup                   (consistent .db snapshot, admin-only)   POST /api/admin/restore (upload .db, rolls back on failure)
 ```
 
 Errors return `{ error: "message" }` with a proper HTTP status. The server never serves
@@ -111,6 +124,7 @@ assets/js/store-core.js    shared DD engine (cart, coupons, checkout, toast, sto
 assets/js/store.js         storefront layer (facets, deals rail, quick view, wishlist) — cards link to /product/<id>
 product.html / assets/js/product.js   canonical product page
 assets/js/invoice.js       printable GST invoice   invoice.html
+setup.html / assets/js/setup.js   first-run setup wizard (DB + identity + admin + backups)
 assets/js/contact.js       brief form
 assets/js/login.js         auth page            assets/js/dashboard.js customer dashboard
 assets/js/admin.js         admin dashboard
@@ -124,9 +138,20 @@ examples/                  design mockups shown before building
 2. `PRODUCTS` in the server is **seed data** (used only to fill an empty DB) — manage live products in **Admin → Products**; storefront rules & coupons in **Admin → Storefront**.
 3. Replace `assets/img/portrait.jpg` with your own photo.
 4. Wordmark is `debasish.` — change it if you use a business brand.
-5. Set `ADMIN_EMAIL` / `ADMIN_PASSWORD` env vars; change session length with `SESSION_DAYS` (default 30).
-6. Seller details printed on invoices/emails: `SELLER_LINE` (business name), `SELLER_ADDR` (address), `SELLER_GSTIN` (your GST number). Defaults are **sample values** marked “(sample)” — replace them before real use.
+5. **Just open `/setup.html`** (or `/admin.html` once the site is set up) — the wizard covers DB location, brand/GSTIN/contact details, the admin account and storefront rules. Env vars still work for headless/CI installs:
+   - `DB_PATH` — pin the database file (the wizard shows a read-only notice instead of the picker)
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — seed/refresh the admin on boot · `SESSION_DAYS` (default 30)
+   - `SELLER_LINE` / `SELLER_ADDR` / `SELLER_GSTIN` / `SELLER_EMAIL` / `SELLER_PHONE` — invoice seller, overridden by values saved in the wizard
+6. Seller details saved in the wizard are printed on every GST invoice; the **WhatsApp number, email and phone** you set also replace the placeholders across the public pages automatically (HTML & JS assets are substituted per request, like the canonical/OG URLs).
 7. Public site URL for absolute OG/canonical links is derived from the incoming request (works out of the box behind any domain/proxy); no env var needed.
+
+## Database & live installs
+
+- **Engine:** embedded SQLite via Node's built-in `node:sqlite` — no MySQL/Postgres server to configure. “Connecting a database” = choosing the file (default `data/site.db`, git-ignored). Put it on a mounted volume for VPS/cPanel deploys via the wizard or `DB_PATH`.
+- **Fresh deploy:** everything redirects to `/setup.html` until setup completes. The wizard can (re)install the demo catalogue, wipe to an **empty store** (schema + your admin only), and switch the database file live — sessions for the old file die, the new one is migrated + seeded automatically.
+- **Backups:** Admin → or `/setup.html` → *Download database backup* (consistent `VACUUM INTO` snapshot incl. all orders/customers). *Restore from backup* uploads a `.db` (max 40 MB), validates integrity + schema, keeps a timestamped `.bak-*` safety copy next to the live file, and rolls back automatically if validation fails.
+- **Non-destructive checks:** “Test connection” opens/creates the target, runs `PRAGMA integrity_check` and reports table counts — without seeding anything (a brand-new file is removed after the test).
+- **Demo vs empty:** choosing *Empty store* on a database that already holds data requires an explicit “erase existing data” confirmation.
 
 ## Local preview of the static-only variant
 

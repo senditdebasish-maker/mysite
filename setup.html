@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Site setup — debasish. · Web Studio &amp; Store</title>
+<meta name="description" content="First-run installer: connect the database, set your brand, seller details, admin account and storefront rules." />
+<meta name="robots" content="noindex, nofollow" />
+<meta name="theme-color" content="#141414" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23141414'/%3E%3Ctext x='26' y='45' font-family='Georgia,serif' font-weight='700' font-size='38' fill='%23FAF6EF' text-anchor='middle'%3Ed%3C/text%3E%3Ccircle cx='45' cy='43' r='5.5' fill='%23E8542F'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Inter:wght@400..800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/styles.css" />
+<link rel="stylesheet" href="assets/css/app.css" />
+</head>
+<body class="setup-page">
+
+<header class="setup-top">
+  <div class="setup-top-inner">
+    <a class="wordmark" href="index.html" aria-label="debasish. — home">debasish<span class="wm-dot">.</span></a>
+    <div class="setup-top-right">
+      <span class="setup-pill" id="setupPill">Checking…</span>
+      <a class="btn btn-ghost btn-sm" href="admin.html" id="setupAdminLink" hidden>Admin dashboard →</a>
+    </div>
+  </div>
+</header>
+
+<main class="setup-wrap">
+
+  <div class="setup-intro">
+    <h1 id="setupHeading">Site setup</h1>
+    <p id="setupLede">Everything on this page can be changed later from <strong>Admin → Storefront</strong> and here (sign in as admin). Nothing goes live until you press <strong>Complete setup</strong>.</p>
+  </div>
+
+  <div class="setup-grid">
+
+    <!-- ══════════ STEP 1 · DATABASE ══════════ -->
+    <section class="setup-card" id="cardDb" aria-labelledby="h-db">
+      <div class="setup-card-head">
+        <span class="setup-num">1</span>
+        <div>
+          <h2 id="h-db">Database</h2>
+          <p class="setup-sub">Where your products, orders, customers and reviews live.</p>
+        </div>
+      </div>
+
+      <div class="setup-kv">
+        <div><span>Engine</span><strong id="dbEngine">—</strong></div>
+        <div><span>Current file</span><strong class="mono" id="dbCurrent">—</strong></div>
+        <div><span>Size</span><strong id="dbSize">—</strong></div>
+        <div><span>Holds</span><strong id="dbCounts">—</strong></div>
+      </div>
+
+      <div class="setup-envlock" id="dbEnvLock" hidden>
+        🔒 The database path is pinned by the <code>DB_PATH</code> environment variable on this server — it can only be changed there. Test &amp; inspect still work.
+      </div>
+
+      <label class="field" style="margin-top:.7rem">Database file location
+        <input type="text" id="dbPath" autocomplete="off" spellcheck="false" placeholder="/var/lib/mysite/site.db" />
+      </label>
+      <p class="setup-hint">Absolute path, or relative to the app folder. The file and its folder are created if missing. Point it at a mounted volume to survive redeploys.</p>
+
+      <div class="setup-row">
+        <button class="btn btn-ghost btn-sm" id="dbTestBtn" type="button">Test connection</button>
+        <div class="setup-testresult" id="dbTestResult" role="status"></div>
+      </div>
+
+      <fieldset class="setup-modes" id="dbModes">
+        <legend>What should the database hold?</legend>
+        <label class="setup-mode"><input type="radio" name="dbMode" value="demo" checked />
+          <span><strong>Demo catalogue</strong><small>14 sample products, coupons WELCOME10 / FLAT100 / SHELF150, sample reviews + 3 demo orders — perfect for a preview or trial.</small></span>
+        </label>
+        <label class="setup-mode"><input type="radio" name="dbMode" value="empty" />
+          <span><strong>Empty store</strong><small>Schema + your admin account only. You add products, coupons and photos yourself.</small></span>
+        </label>
+      </fieldset>
+      <label class="setup-reset" id="dbResetWrap" hidden><input type="checkbox" id="dbReset" /> I understand — <strong>erase everything currently in that file</strong> and start fresh</label>
+
+      <div class="setup-card-foot">
+        <button class="btn btn-ink btn-sm" id="dbApplyBtn" type="button">Apply database</button>
+        <span class="setup-hint" id="dbApplyHint"></span>
+      </div>
+    </section>
+
+    <!-- ══════════ STEP 2 · IDENTITY ══════════ -->
+    <section class="setup-card" id="cardSite" aria-labelledby="h-site">
+      <div class="setup-card-head">
+        <span class="setup-num">2</span>
+        <div>
+          <h2 id="h-site">Brand &amp; seller identity</h2>
+          <p class="setup-sub">Printed on GST invoices, used for the store name, and swapped into the contact links across the site.</p>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <label class="field">Brand / wordmark<input type="text" id="siteBrand" maxlength="80" placeholder="debasish. — Web Studio &amp; Store" /></label>
+        <label class="field">Tagline<input type="text" id="siteTagline" maxlength="140" placeholder="Web design · Hosting · Handpicked store" /></label>
+      </div>
+      <label class="field">Seller address<input type="text" id="siteAddress" maxlength="160" placeholder="14B, Gariahat Road, Kolkata 700029" /></label>
+      <div class="field-row">
+        <label class="field">GSTIN<input type="text" id="siteGstin" maxlength="32" class="mono" placeholder="19ABCDE1234F1Z5" /></label>
+        <label class="field">Contact email<input type="email" id="siteEmail" maxlength="120" placeholder="hello@yourdomain.in" /></label>
+      </div>
+      <div class="field-row">
+        <label class="field">Phone (display)<input type="text" id="sitePhone" maxlength="32" placeholder="+91 98765 01020" /></label>
+        <label class="field">WhatsApp number<input type="text" id="siteWhatsapp" maxlength="20" class="mono" placeholder="919876501020 — digits only" /></label>
+      </div>
+      <p class="setup-hint">Leave a field blank to keep the placeholder. WhatsApp links across the public site switch to your number automatically once saved.</p>
+
+      <div class="setup-card-foot">
+        <button class="btn btn-ink btn-sm" id="siteSaveBtn" type="button">Save identity</button>
+        <span class="setup-saved" id="siteSaved" hidden>✓ saved</span>
+      </div>
+    </section>
+
+    <!-- ══════════ STEP 3 · ADMIN ══════════ -->
+    <section class="setup-card" id="cardAdmin" aria-labelledby="h-admin">
+      <div class="setup-card-head">
+        <span class="setup-num">3</span>
+        <div>
+          <h2 id="h-admin">Admin account</h2>
+          <p class="setup-sub">The login for the admin dashboard. If the email already exists, its password is updated.</p>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <label class="field">Your name<input type="text" id="admName" maxlength="80" placeholder="Debasish Das" autocomplete="name" /></label>
+        <label class="field">Phone<input type="text" id="admPhone" maxlength="32" placeholder="+91 98XXX XXXXX" /></label>
+      </div>
+      <label class="field">Admin email<input type="email" id="admEmail" maxlength="120" placeholder="you@yourdomain.in" autocomplete="username" /></label>
+      <div class="field-row">
+        <label class="field">Password<input type="password" id="admPassword" minlength="8" autocomplete="new-password" placeholder="At least 8 characters" /></label>
+        <label class="field">Confirm password<input type="password" id="admConfirm" minlength="8" autocomplete="new-password" placeholder="Repeat it" /></label>
+      </div>
+      <div class="setup-pwbar" aria-hidden="true"><span id="pwFill"></span></div>
+      <p class="setup-hint" id="pwHint">Use a real password — this account can reprice the store, see every order and change the database.</p>
+
+      <div class="setup-card-foot">
+        <button class="btn btn-ink btn-sm" id="adminSaveBtn" type="button">Create / update admin</button>
+        <span class="setup-saved" id="adminSaved" hidden>✓ saved</span>
+      </div>
+    </section>
+
+    <!-- ══════════ STEP 4 · STOREFRONT ══════════ -->
+    <section class="setup-card" id="cardStore" aria-labelledby="h-store">
+      <div class="setup-card-head">
+        <span class="setup-num">4</span>
+        <div>
+          <h2 id="h-store">Storefront rules</h2>
+          <p class="setup-sub">Delivery charges, cash-on-delivery policy and whether the store is open for orders.</p>
+        </div>
+      </div>
+
+      <label class="field">Announcement bar<input type="text" id="stAnnounce" maxlength="140" placeholder="Free delivery over ₹999 ✦ 7-day easy returns ✦ COD &amp; UPI on delivery" /></label>
+      <div class="field-row">
+        <label class="field">Free delivery above (₹)<input type="number" id="stFreeAt" min="0" step="1" /></label>
+        <label class="field">Delivery fee below that (₹)<input type="number" id="stFee" min="0" step="1" /></label>
+      </div>
+      <div class="field-row">
+        <label class="field">Max qty per item<input type="number" id="stMaxQty" min="1" max="99" step="1" /></label>
+        <label class="field">COD minimum order (₹)<input type="number" id="stCodMin" min="0" step="1" /></label>
+      </div>
+      <div class="setup-switches">
+        <label class="setup-switch"><input type="checkbox" id="stCod" /><span class="sw"></span> Cash on delivery enabled</label>
+        <label class="setup-switch"><input type="checkbox" id="stLive" /><span class="sw"></span> Store is LIVE for orders</label>
+      </div>
+      <p class="setup-hint">When the store is not live, the checkout closes and visitors see a “restocking soon” note — products stay browsable.</p>
+
+      <div class="setup-card-foot">
+        <button class="btn btn-ink btn-sm" id="storeSaveBtn" type="button">Save rules</button>
+        <span class="setup-saved" id="storeSaved" hidden>✓ saved</span>
+      </div>
+    </section>
+
+    <!-- ══════════ STEP 5 · MAINTENANCE ══════════ -->
+    <section class="setup-card" id="cardMaint" aria-labelledby="h-maint">
+      <div class="setup-card-head">
+        <span class="setup-num">5</span>
+        <div>
+          <h2 id="h-maint">Backups &amp; restore</h2>
+          <p class="setup-sub">Belt and suspenders for a live store — one click downloads everything.</p>
+        </div>
+      </div>
+
+      <div class="setup-maint">
+        <a class="btn btn-ghost btn-sm" id="backupBtn" href="api/admin/backup">⬇ Download database backup</a>
+        <div class="setup-restore">
+          <input type="file" id="restoreFile" accept=".db,application/octet-stream" hidden />
+          <button class="btn btn-ghost btn-sm" id="restoreBtn" type="button">⬆ Restore from backup…</button>
+        </div>
+      </div>
+      <p class="setup-hint">Restore replaces the <em>entire</em> database (orders, customers, everything). A timestamped safety copy of the current file is kept next to it. You will be signed out.</p>
+    </section>
+
+  </div><!-- /setup-grid -->
+
+  <!-- ══════════ FINISH ══════════ -->
+  <section class="setup-finish" id="setupFinish">
+    <div>
+      <strong id="finishTitle">Ready to go live?</strong>
+      <p id="finishSub">Completing setup opens the site to the public and locks this wizard behind your admin login.</p>
+    </div>
+    <div class="setup-finish-actions">
+      <a class="btn btn-ghost" href="index.html" id="finishPreview" hidden>Preview site</a>
+      <button class="btn btn-primary btn-lg" id="completeBtn" type="button">Complete setup →</button>
+    </div>
+  </section>
+
+  <p class="setup-foot">Setup data lives on this server only · nothing is sent anywhere · <a href="index.html">back to site</a></p>
+</main>
+
+<script src="assets/js/ui.js"></script>
+<script src="assets/js/setup.js" defer></script>
+</body>
+</html>

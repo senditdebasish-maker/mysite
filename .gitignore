@@ -4,3 +4,7 @@ data/*.db-journal
 data/*.db-wal
 npm-debug.log*
 .DS_Store
+data/install.json
+data/*.bak-*
+data/*.restore-tmp
+*.jar
