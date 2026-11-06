@@ -394,8 +394,12 @@ app.use(express.static(ROOT, {
   },
 }));
 
-/* API 404 + JSON errors */
+/* API 404 (JSON) + branded 404 page for everything else */
 app.use("/api", (req, res) => res.status(404).json({ error: "Not found" }));
+app.use((req, res) => {
+  if (req.method !== "GET" && req.method !== "HEAD") return res.status(404).send("Not found");
+  res.status(404).sendFile(path.join(ROOT, "404.html"));
+});
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n  Debasish Das — Web Studio & Store`);

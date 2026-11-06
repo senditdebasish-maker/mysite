@@ -41,7 +41,7 @@
 
   async function loadOrders(announce) {
     try {
-      const data = await fetchJSON("/api/my/orders");
+      const data = await fetchJSON("api/my/orders");
       const wrap = $("#ordersWrap");
       const orders = data.orders || [];
       $("#ordersEmpty").hidden = orders.length !== 0;
@@ -68,7 +68,7 @@
       if (found) found.qty += qty; else cart.push({ id, qty });
     }
     try { localStorage.setItem("dd_cart_v1", JSON.stringify(cart)); } catch {}
-    location.href = "/";
+    location.href = "index.html";
   });
 
   bindLogout("logoutBtn");
@@ -76,7 +76,7 @@
   $("#profileForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      const data = await fetchJSON("/api/me", {
+      const data = await fetchJSON("api/me", {
         method: "PUT",
         body: JSON.stringify({ name: $("#p-name").value, phone: $("#p-phone").value }),
       });
@@ -91,9 +91,9 @@
 
   (async function init() {
     let me = null;
-    try { me = (await fetchJSON("/api/me")).user; } catch {}
-    if (!me) { location.replace("/login.html?next=/dashboard.html"); return; }
-    if (me.role === "admin") { location.replace("/admin.html"); return; }
+    try { me = (await fetchJSON("api/me")).user; } catch {}
+    if (!me) { location.replace("login.html?next=dashboard.html"); return; }
+    if (me.role === "admin") { location.replace("admin.html"); return; }
 
     const first = (me.name || "friend").trim().split(/\s+/)[0];
     $("#firstName").textContent = first;

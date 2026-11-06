@@ -2,7 +2,8 @@
 (function () {
   const $ = (s) => document.querySelector(s);
   const params = new URLSearchParams(location.search);
-  const next = params.get("next") || null;
+  const rawNext = params.get("next") || "";
+  const next = /^[\w./-]+\.html(\?.*)?$/.test(rawNext) && !rawNext.includes("..") ? rawNext : null;
 
   const heading = $("#authHeading"), cardSub = $("#authCardSub"), errEl = $("#authError");
   const tabLogin = $("#tabLogin"), tabRegister = $("#tabRegister");
@@ -39,14 +40,14 @@
     $("#li-password").value = "customer123";
   });
 
-  const destFor = (user) => next || (user.role === "admin" ? "/admin.html" : "/dashboard.html");
+  const destFor = (user) => next || (user.role === "admin" ? "admin.html" : "dashboard.html");
 
   formLogin.addEventListener("submit", async (e) => {
     e.preventDefault();
     showError("");
     const btn = $("#li-submit"); btn.disabled = true; btn.textContent = "Signing in…";
     try {
-      const data = await window.UI.fetchJSON("/api/auth/login", {
+      const data = await window.UI.fetchJSON("api/auth/login", {
         method: "POST",
         body: JSON.stringify({ email: $("#li-email").value, password: $("#li-password").value }),
       });
@@ -62,7 +63,7 @@
     showError("");
     const btn = $("#re-submit"); btn.disabled = true; btn.textContent = "Creating…";
     try {
-      const data = await window.UI.fetchJSON("/api/auth/register", {
+      const data = await window.UI.fetchJSON("api/auth/register", {
         method: "POST",
         body: JSON.stringify({
           name: $("#re-name").value, email: $("#re-email").value,
@@ -79,7 +80,7 @@
   // already signed in? bounce to the right place
   (async () => {
     try {
-      const res = await fetch("/api/me");
+      const res = await fetch("api/me");
       const data = await res.json();
       if (data.user) location.replace(destFor(data.user));
     } catch { /* stay on login */ }

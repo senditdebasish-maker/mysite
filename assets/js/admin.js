@@ -60,8 +60,8 @@
   /* ───────── overview ───────── */
   async function loadOverview() {
     const [stats, ordersRes] = await Promise.all([
-      fetchJSON("/api/admin/stats"),
-      fetchJSON("/api/admin/orders"),
+      fetchJSON("api/admin/stats"),
+      fetchJSON("api/admin/orders"),
     ]);
     ordersCache = ordersRes.orders || [];
 
@@ -91,7 +91,7 @@
 
     // low stock list (from products endpoint for detail)
     try {
-      const p = await fetchJSON("/api/admin/products");
+      const p = await fetchJSON("api/admin/products");
       const low = (p.products || []).filter(x => x.active && x.stock <= 5);
       $("#lowStockList").innerHTML = low.length
         ? low.map(x => `<span>${esc(x.name)} — ${x.stock} left</span>`).join("")
@@ -127,8 +127,8 @@
   }
 
   async function loadOrders() {
-    if (!ordersCache.length) ordersCache = (await fetchJSON("/api/admin/orders")).orders || [];
-    else ordersCache = (await fetchJSON("/api/admin/orders")).orders || [];
+    if (!ordersCache.length) ordersCache = (await fetchJSON("api/admin/orders")).orders || [];
+    else ordersCache = (await fetchJSON("api/admin/orders")).orders || [];
     const rows = ordersCache.filter(o => orderFilter === "all" || o.status === orderFilter);
     $("#ordersBody").innerHTML = rows.map(orderRow).join("");
     $("#ordersEmptyNote").hidden = rows.length !== 0;
@@ -138,7 +138,7 @@
     const sel = e.target.closest("select[data-status-id]");
     if (!sel) return;
     try {
-      await fetchJSON(`/api/admin/orders/${sel.dataset.statusId}/status`, { method: "PUT", body: JSON.stringify({ status: sel.value }) });
+      await fetchJSON(`api/admin/orders/${sel.dataset.statusId}/status`, { method: "PUT", body: JSON.stringify({ status: sel.value }) });
       const o = ordersCache.find(x => x.id === Number(sel.dataset.statusId));
       if (o) o.status = sel.value;
       toast(`Order #${sel.dataset.statusId} → <b>${statusLabel[sel.value]}</b>`);
@@ -181,7 +181,7 @@
   }
 
   async function loadProducts() {
-    productsCache = (await fetchJSON("/api/admin/products")).products || [];
+    productsCache = (await fetchJSON("api/admin/products")).products || [];
     $("#productsList").innerHTML = productsCache.map(productRow).join("") || `<p class="muted">No products yet — add your first one.</p>`;
   }
 
@@ -233,10 +233,10 @@
     const btn = $("#editorSave"); btn.disabled = true;
     try {
       if (editingId) {
-        await fetchJSON(`/api/admin/products/${encodeURIComponent(editingId)}`, { method: "PUT", body: JSON.stringify(body) });
+        await fetchJSON(`api/admin/products/${encodeURIComponent(editingId)}`, { method: "PUT", body: JSON.stringify(body) });
         toast("Product updated");
       } else {
-        await fetchJSON("/api/admin/products", { method: "POST", body: JSON.stringify(body) });
+        await fetchJSON("api/admin/products", { method: "POST", body: JSON.stringify(body) });
         toast("Product added to the store");
       }
       closeEditor();
@@ -261,7 +261,7 @@
       if (!p) return;
       if (!confirm(`Remove “${p.name}” from the store? (It stays in past orders.)`)) return;
       try {
-        await fetchJSON(`/api/admin/products/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+        await fetchJSON(`api/admin/products/${encodeURIComponent(p.id)}`, { method: "DELETE" });
         toast("Removed from the store");
         loadProducts();
       } catch (err) { toast(err.message); }
@@ -270,7 +270,7 @@
 
   /* ───────── customers ───────── */
   async function loadCustomers() {
-    const data = await fetchJSON("/api/admin/customers");
+    const data = await fetchJSON("api/admin/customers");
     const rows = data.customers || [];
     $("#customersBody").innerHTML = rows.map(c => `
       <tr>
@@ -305,7 +305,7 @@
   }
 
   async function loadInquiries() {
-    const data = await fetchJSON("/api/admin/inquiries");
+    const data = await fetchJSON("api/admin/inquiries");
     const rows = data.inquiries || [];
     $("#inquiriesList").innerHTML = rows.map(inquiryCard).join("") || `<p class="muted">No leads yet — they’ll appear here when someone books a call.</p>`;
   }
@@ -315,9 +315,9 @@
   setInterval(() => { if (!currentTab || $("#productEditor").hidden) loadPane(currentTab, false); }, 30000);
 
   (async function init() {
-    try { me = (await fetchJSON("/api/me")).user; } catch {}
-    if (!me) { location.replace("/login.html?next=/admin.html"); return; }
-    if (me.role !== "admin") { location.replace("/dashboard.html"); return; }
+    try { me = (await fetchJSON("api/me")).user; } catch {}
+    if (!me) { location.replace("login.html?next=admin.html"); return; }
+    if (me.role !== "admin") { location.replace("dashboard.html"); return; }
     $("#adminFirst").textContent = me.name.split(" ")[0];
     setTab("overview");
   })();

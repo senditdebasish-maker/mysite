@@ -329,7 +329,7 @@ checkoutForm.addEventListener("submit", async (e) => {
   if (!phone.value.trim()) { phone.focus(); showToast("Please share a contact phone"); return; }
   const btn = $("#coConfirm"); btn.disabled = true; btn.textContent = "Placing order…";
   try {
-    const res = await fetch("/api/orders", {
+    const res = await fetch("api/orders", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         customer_name: name.value, phone: phone.value, address: address.value,
@@ -347,7 +347,7 @@ checkoutForm.addEventListener("submit", async (e) => {
     checkoutForm.hidden = true;
     $("#osOrderId").textContent = "#" + o.id;
     $("#osTotal").textContent = fmtINR(o.total);
-    $("#osTrack").href = ME ? "/dashboard.html" : "/login.html?next=/dashboard.html";
+    $("#osTrack").href = ME ? "dashboard.html" : "login.html?next=dashboard.html";
     $("#osTrack").textContent = ME ? "Track my orders →" : "Sign in to track orders →";
     orderSuccess.hidden = false;
     // refresh live products (stock changed)
@@ -388,7 +388,7 @@ $("#callForm").addEventListener("submit", async (e) => {
   if (!need.value)        { need.focus(); showToast("Please choose what you need"); return; }
   const payload = { name: name.value.trim(), phone: phone.value.trim(), need: need.value, budget: budget.value, message: msg.value.trim() };
   // save the lead for the admin dashboard (fire-and-forget, never blocks WhatsApp)
-  fetch("/api/inquiries", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => {});
+  fetch("api/inquiries", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => {});
   const text = [
     `Hi ${SITE.brand}! I'm ${name.value.trim()}.`,
     `Need: ${need.value}`,
@@ -418,7 +418,7 @@ let ME = null;
 
 async function fetchMe(){
   try {
-    const res = await fetch("/api/me");
+    const res = await fetch("api/me");
     if (!res.ok) return null;
     const data = await res.json();
     return data.user || null;
@@ -426,7 +426,7 @@ async function fetchMe(){
 }
 async function loadProducts(){
   try {
-    const res = await fetch("/api/products");
+    const res = await fetch("api/products");
     if (!res.ok) return;
     const data = await res.json();
     if (Array.isArray(data.products) && data.products.length){
@@ -442,15 +442,15 @@ function renderAuthUI(){
     if (loginBtn) loginBtn.hidden = true;
     if (account){
       account.hidden = false;
-      account.href = ME.role === "admin" ? "/admin.html" : "/dashboard.html";
+      account.href = ME.role === "admin" ? "admin.html" : "dashboard.html";
       $("#navAccountInitial").textContent = (ME.name || "U").trim().charAt(0).toUpperCase();
       $("#navAccountName").textContent = (ME.name || "You").trim().split(/\s+/)[0];
     }
-    if (mobileLogin){ mobileLogin.href = account ? account.href : "/dashboard.html"; mobileLogin.firstChild.textContent = ME.role === "admin" ? "Admin Dashboard " : "My Dashboard "; }
+    if (mobileLogin){ mobileLogin.href = account ? account.href : "dashboard.html"; mobileLogin.firstChild.textContent = ME.role === "admin" ? "Admin Dashboard " : "My Dashboard "; }
   } else {
     if (loginBtn) loginBtn.hidden = false;
     if (account) account.hidden = true;
-    if (mobileLogin){ mobileLogin.href = "/login.html"; mobileLogin.firstChild.textContent = "Login / Sign up "; }
+    if (mobileLogin){ mobileLogin.href = "login.html"; mobileLogin.firstChild.textContent = "Login / Sign up "; }
   }
 }
 

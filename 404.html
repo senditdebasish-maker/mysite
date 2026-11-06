@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Page not found — debasish.</title>
+<meta name="robots" content="noindex" />
+<meta name="theme-color" content="#FAF6EF" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23141414'/%3E%3Ctext x='26' y='45' font-family='Georgia,serif' font-weight='700' font-size='38' fill='%23FAF6EF' text-anchor='middle'%3Ed%3C/text%3E%3Ccircle cx='45' cy='43' r='5.5' fill='%23E8542F'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Inter:wght@400..800&display=swap" rel="stylesheet" />
+<style>
+  :root { --ink:#141414; --cream:#FAF6EF; --orange:#E8542F; --muted:#6b6b6b; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { min-height:100dvh; background:var(--cream); color:var(--ink); font-family:'Inter',system-ui,sans-serif; display:flex; flex-direction:column; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:1.1rem clamp(1.2rem,4vw,3rem); border-bottom:1px solid #e9e2d2; }
+  .wordmark { font-family:'Fraunces',Georgia,serif; font-weight:900; font-size:1.6rem; letter-spacing:-.02em; color:var(--ink); text-decoration:none; }
+  .wm-dot { color:var(--orange); }
+  .back { font-size:.85rem; font-weight:700; color:var(--ink); text-decoration:none; border:1.5px solid var(--ink); border-radius:999px; padding:.45rem 1rem; }
+  .back:hover { background:var(--ink); color:var(--cream); }
+  main { flex:1; display:grid; place-items:center; text-align:center; padding:2rem 1.2rem; }
+  .code { font-family:'Fraunces',Georgia,serif; font-weight:900; font-size:clamp(6rem,22vw,11rem); line-height:.9; letter-spacing:-.04em; font-variation-settings:"opsz" 144; }
+  .code em { font-style:italic; color:var(--orange); }
+  h1 { font-family:'Fraunces',Georgia,serif; font-weight:800; font-size:clamp(1.4rem,3vw,2rem); margin:1.2rem 0 .4rem; }
+  p { color:var(--muted); max-width:44ch; margin:0 auto; line-height:1.6; }
+  .actions { display:flex; gap:.7rem; justify-content:center; margin-top:1.6rem; flex-wrap:wrap; }
+  .btn { display:inline-flex; align-items:center; gap:.4rem; font-weight:800; font-size:.9rem; border-radius:999px; padding:.75rem 1.5rem; text-decoration:none; border:1.5px solid var(--ink); }
+  .btn-ink { background:var(--ink); color:var(--cream); }
+  .btn-ink:hover { transform:translateY(-1px); }
+  .btn-ghost { color:var(--ink); background:transparent; }
+  .btn-ghost:hover { background:var(--ink); color:var(--cream); }
+  .hint { margin-top:1.4rem; font-size:.76rem; color:var(--muted); }
+  .hint code { background:#efe9da; border-radius:6px; padding:.1rem .4rem; font-size:.72rem; }
+</style>
+</head>
+<body>
+<header>
+  <a class="wordmark" href="index.html">debasish<span class="wm-dot">.</span></a>
+  <a class="back" href="index.html">← Back home</a>
+</header>
+<main>
+  <div>
+    <div class="code">4<em>0</em>4</div>
+    <h1>This page wandered off the shelf.</h1>
+    <p>The address might be mistyped — it happens. Try the store, book a free call, or head back to the homepage.</p>
+    <div class="actions">
+      <a class="btn btn-ink" href="index.html">Visit the Store</a>
+      <a class="btn btn-ghost" href="login.html">Sign in</a>
+      <a class="btn btn-ghost" href="index.html#contact">Book a free call</a>
+    </div>
+    <p class="hint">Our pages: <code>index.html</code> · <code>login.html</code> · <code>dashboard.html</code> · <code>admin.html</code> — all files end in <code>.html</code>.</p>
+  </div>
+</main>
+</body>
+</html>
