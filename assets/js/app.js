@@ -137,7 +137,10 @@ function goTo(id){
 $$("[data-goto]").forEach(btn => btn.addEventListener("click", () => { closeCart(); goTo(btn.dataset.goto); }));
 
 function setActiveSection(id){
-  $$(".nav-link").forEach(l => l.classList.toggle("is-active", l.dataset.goto === id));
+  $$(".nav-link").forEach(l => {
+    const target = l.dataset.goto ?? (l.getAttribute("href") === "index.html" ? "home" : null);
+    l.classList.toggle("is-active", target === id);
+  });
   $$(".rail-dot").forEach(d => d.classList.toggle("is-active", d.dataset.goto === id));
 }
 

@@ -707,3 +707,9 @@ a.channel:hover{ transform:translateY(-2px); box-shadow:var(--shadow-sm); border
 
 /* utility — beats component display rules so [hidden] always wins */
 [hidden]{ display:none !important; }
+
+/* nav links can now be anchors (dedicated pages) */
+.nav-link{ text-decoration:none; }
+.mm-link{ text-decoration:none; }
+.nav-cta{ text-decoration:none; display:inline-flex; align-items:center; }
+.link-arrow{ text-decoration:none; }

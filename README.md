@@ -43,9 +43,15 @@ ADMIN_EMAIL=me@studio.in ADMIN_PASSWORD='a-strong-password' npm start
 | Page            | Purpose |
 |-----------------|---------|
 | `/`             | Scroll-snap home: hero, services carousel, hosting plans, **the shelf** (store), contact |
+| `/services.html` | **Services** — full catalogue: 6 services with inclusions, 4-step process, FAQ, WhatsApp quotes |
+| `/hosting.html`  | **Hosting** — 3 plans (₹199/₹499/₹999 + GST), included-features grid, comparison table, FAQ |
+| `/store.html`    | **The Shelf** — full store: tag filters, live product grid, working cart + checkout |
+| `/contact.html`  | **Book a free call** — WhatsApp/call/email channels + brief form (saves to admin Leads) |
 | `/login.html`   | Split-screen sign in / create account (tabs, demo-creds autofill) |
 | `/dashboard.html` | **Customer dashboard** — My Orders with live status stepper, reorder, profile edit |
 | `/admin.html`   | **Admin dashboard** — Overview stats, Orders (filter + status changes), Products (add/edit/restock/delete), Customers, Leads inbox (from the “Book a call” form) |
+
+The nav tabs on every page link to these dedicated pages; the home page keeps the snap-scroll single-page experience.
 
 ### Features
 
@@ -77,10 +83,14 @@ Errors return `{ error: "message" }` with a proper HTTP status. The server never
 
 ```
 index.html                 home (snap sections, cart drawer, checkout + success states)
+services.html / hosting.html / store.html / contact.html   ← tab pages
 login.html / dashboard.html / admin.html
 server/server.js           Express + node:sqlite backend (API + static hosting + seed)
 assets/css/styles.css      home page theme      assets/css/app.css   login/dashboard/admin theme
+assets/css/pages.css       shared chrome for the 4 tab pages (nav, footer, heroes, cards, FAQ)
 assets/js/app.js           home page logic      assets/js/ui.js      shared helpers (toast/fetch/fmt)
+assets/js/subpages.js      tab pages: mobile menu, live cart badge, auth-aware nav
+assets/js/store.js         full store (filters, grid, cart, checkout) · assets/js/contact.js   brief form
 assets/js/login.js         auth page            assets/js/dashboard.js customer dashboard
 assets/js/admin.js         admin dashboard
 assets/img/                portrait & product photos (AI-generated samples)
