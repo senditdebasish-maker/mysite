@@ -1,8 +1,8 @@
 <?php
 /**
  * Debasish Das — Web Studio & Store · PHP backend (shared-hosting edition)
- * Any Apache + PHP 8 host with PDO SQLite — no Node.js required.
- * The JSON API matches the Node server contract exactly, so the existing
+ * Any Apache + PHP 8 host with PDO SQLite.
+ * The JSON API is versioned in lockstep with the frontend.
  * frontend JS works unchanged.
  */
 declare(strict_types=1);
@@ -31,7 +31,7 @@ function dd_write_install(array $obj): void {
   @file_put_contents(DD_DATA . '/install.json', json_encode($obj, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 }
 
-/** Resolve a user-supplied database path exactly like the Node server does. */
+/** Resolve a user-supplied database path. */
 function dd_resolve_db_target(?string $p): string {
   $s = trim((string) $p);
   if ($s === '') $s = DD_DATA . '/site.db';

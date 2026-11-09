@@ -83,7 +83,7 @@ function dd_db_info(): array {
   $size = @filesize($path);
   $env  = dd_env_db_path();
   return [
-    'engine'      => 'SQLite (PHP PDO — any Apache+PHP host, no Node.js required)',
+    'engine'      => 'SQLite (PHP PDO — any Apache+PHP host)',
     'path'        => $path,
     'defaultPath' => DD_DATA . '/site.db',
     'envLocked'   => $env !== null,
@@ -106,10 +106,9 @@ function dd_wipe_all_tables(): void {
 }
 
 /* ════════════════ passwords ════════════════
-   Stored format is byte-compatible with the Node edition: randomBytes(16) salt
-   as a 32-char hex STRING used as the scrypt salt, 128-hex output — so a
-   database written by either edition opens cleanly in the other. (DBs written
-   by an interim bcrypt build are still accepted via password_verify.) */
+   Stored format: 16 random bytes as a 32-char hex STRING used as the scrypt
+   salt (N=16384, r=8, p=1, 64-byte key), 128-hex output. Older databases that
+   were hashed with bcrypt are still accepted via password_verify. */
 function dd_new_salt(): string { return bin2hex(random_bytes(16)); }
 function dd_scrypt_hex(string $pw, string $saltStr): string {
   require_once __DIR__ . '/scrypt.php';
@@ -125,7 +124,7 @@ function dd_verify_password(string $pw, array $u): bool {
   if ($salt === 'bcrypt') return password_verify($pw, $hash);
   if ($salt !== '' && strlen($hash) === 128) {
     require_once __DIR__ . '/scrypt.php';
-    return scrypt_verify_node($pw, $salt, $hash);
+    return scrypt_verify_password($pw, $salt, $hash);
   }
   return false;
 }

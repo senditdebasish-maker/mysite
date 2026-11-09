@@ -937,7 +937,7 @@ function dd_handle(array $req): array {
   $path = '/' . trim((string) ($req['subpath'] ?? '/'), '/');
   if ($path === '/') $path = '/';
 
-  // size guards (mirrors the Node limits)
+  // size guards
   $rawLen = strlen((string) ($req['raw'] ?? ''));
   $ctype = strtolower((string) ($req['headers']['content-type'] ?? ''));
   $isBinaryUpload = stripos($ctype, 'application/octet-stream') !== false || stripos($ctype, 'application/x-sqlite3') !== false || stripos($ctype, 'application/vnd.sqlite3') !== false;
@@ -956,7 +956,7 @@ function dd_handle(array $req): array {
   };
 
   try {
-    // [method, pattern, handler] — order matches server.js
+    // [method, pattern, handler]
     $route('POST', '#^/auth/register$#', fn ($req) => route_auth_register($req));
     $route('POST', '#^/auth/login$#', fn ($req) => route_auth_login($req));
     $route('POST', '#^/auth/logout$#', fn ($req) => route_auth_logout($req));

@@ -1,11 +1,11 @@
 <?php
 /**
  * scrypt (RFC 7914) — pure PHP, for verifying password hashes created by the
- * Node server (crypto.scryptSync defaults: N=16384, r=8, p=1, 64-byte key).
+ * Parameters follow the classic scrypt defaults: N=16384, r=8, p=1, 64-byte key.
  * PHP has no native scrypt, so this exists solely for legacy-account migration.
  * New passwords are always stored as password_hash() bcrypt.
  *
- * Verified against RFC 7914 §10 test vectors and Node crypto output.
+ * Verified against RFC 7914 §10 test vectors.
  */
 
 function _rotl32($x, $n) {
@@ -76,10 +76,10 @@ function scrypt_hash($password, $salt, $N, $r, $p, $dkLen) {
   return hash_pbkdf2('sha256', $password, $B, 1, $dkLen, true);
 }
 
-/** Verify against Node crypto.scryptSync(password, salt, 64) with N=16384, r=8, p=1.
-    The Node server stores randomBytes(16).toString("hex") in password_salt and passes
-    that 32-char string (as utf8 bytes) directly to scryptSync — keep that contract. */
-function scrypt_verify_node($password, $saltHex, $expectedHex) {
+/** Verify a scrypt hash (N=16384, r=8, p=1, 64-byte key).
+    password_salt stores random_bytes(16) as a 32-char hex string; that string
+    (as utf8 bytes) is fed to scrypt directly — keep that contract. */
+function scrypt_verify_password($password, $saltHex, $expectedHex) {
   $expected = hex2bin($expectedHex);
   if ($expected === false || strlen($expected) !== 64) return false;
   $dk = scrypt_hash($password, (string) $saltHex, 16384, 8, 1, 64);

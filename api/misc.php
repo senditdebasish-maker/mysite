@@ -27,7 +27,7 @@ function dd_misc_handle(string $what, array $req): array {
   return ['status' => 404, 'headers' => [], 'body' => 'Not found', 'content_type' => 'text/plain; charset=utf-8'];
 }
 
-if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__ && !defined('DD_CLI_TEST')) {
+function dd_misc_main(): void {
   $what = (string) ($_GET['what'] ?? '');
   $headers = [];
   foreach ($_SERVER as $k => $v) {
@@ -45,4 +45,8 @@ if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__ && !defi
   foreach (($resp['headers'] ?? []) as $n => $v) header("$n: $v");
   header('Content-Type: ' . ($resp['content_type'] ?? 'text/plain; charset=utf-8'));
   echo $resp['body'];
+}
+
+if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__ && !defined('DD_CLI_TEST')) {
+  dd_misc_main();
 }

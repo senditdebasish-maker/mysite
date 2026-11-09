@@ -9,7 +9,7 @@ function dd_fmt_inr($n): string {
 
 function dd_render_product(string $id, array $req): array {
   dd_boot_seed(); // idempotent: seeds demo catalogue on a brand-new DB
-  // fresh installs: product pages hold at the wizard too (mirrors server.js SETUP_FREE)
+  // fresh installs: product pages hold at the wizard too
   if (!dd_is_setup_complete()) {
     return ['status' => 302, 'headers' => ['Location' => '/setup.html'], 'body' => '', 'content_type' => 'text/plain; charset=utf-8'];
   }

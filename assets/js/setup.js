@@ -33,11 +33,11 @@
     link.textContent = statusUrl();
     link.href = statusUrl();
     if (e.status === 404) {
-      msg.innerHTML = "The setup API answered <strong>404</strong> — this page is being served <strong>without the Node backend</strong>. Common causes: a static host (GitHub Pages / Netlify), an old build, or `setup.html` uploaded without the new `server/server.js`.";
+      msg.innerHTML = "The setup API answered <strong>404</strong> — the PHP backend isn't wired up here. Common causes: a static host (GitHub Pages / Netlify), the repo uploaded without the <code>api/</code> folder, or `.htaccess` not in effect (see README troubleshooting).";
     } else if (e.status === 403) {
       msg.innerHTML = "Setup is already complete. <a href='login.html?next=/setup.html'>Sign in as admin</a> to change these settings.";
     } else {
-      msg.innerHTML = "Could not reach the server (" + esc(e.message || "network error") + "). Check that the Node app is running and that your proxy forwards <code>/api/*</code> to it.";
+      msg.innerHTML = "Could not reach the server (" + esc(e.message || "network error") + "). Check that Apache + PHP are running and that `/.htaccess` routes <code>/api/*</code> to <code>api/index.php</code> (see README troubleshooting).";
     }
   }
 

@@ -39,9 +39,9 @@
     <p id="troubleMsg"></p>
     <p class="setup-hint">The setup API this page needs is: <a class="mono" id="troubleStatusUrl" href="#" target="_blank" rel="noopener">—</a></p>
     <ol class="setup-fixlist">
-      <li><strong>Restart the Node app</strong> after pulling the latest code — Node caches routes at boot, so an old process never sees <code>/api/setup/*</code> even with new files on disk. (cPanel / Passenger: press “Restart” on the app.)</li>
-      <li><strong>Serve it with the Node server</strong>, not a static host: <code>npm start</code> on Node ≥ 22.5. GitHub Pages / Netlify / <code>python -m http.server</code> can show this page but can never run the installer.</li>
-      <li><strong>Upload the whole repo</strong> — <code>setup.html</code> and <code>server/server.js</code> must come from the same version.</li>
+      <li><strong>Serve it with Apache + PHP</strong>, not a static host: GitHub Pages / Netlify / <code>python -m http.server</code> can show this page but can never run the installer. Local test: <code>php -S localhost:8000 serve.php</code>.</li>
+      <li><strong>Upload the whole repo</strong> — <code>setup.html</code>, <code>api/</code> and <code>.htaccess</code> must come from the same version.</li>
+      <li><strong>If files were replaced recently</strong>, hard-refresh (Ctrl+F5) and retry — stale JS can point at old routes.</li>
       <li><strong>Behind a proxy or subpath?</strong> Forward <code>/api/*</code> to the app untouched, or open <code class="mono">/setup.html?api=/your/subpath/api</code>.</li>
     </ol>
     <div class="setup-fixactions">

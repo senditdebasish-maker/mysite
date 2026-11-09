@@ -1,5 +1,5 @@
 <?php
-/** Seed data + idempotent database seeder (port of server/server.js). */
+/** Seed data + idempotent database seeder. */
 declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 require_once __DIR__ . '/scrypt.php';
@@ -13,7 +13,7 @@ const DD_SEED_REVIEWS_JSON = <<<'JSON'
 JSON;
 
 function dd_hash_pw(string $pw, string $salt): string {
-  // legacy path for the Node-compatible format; returns scrypt hex
+  // scrypt format (see core.php); returns 128-hex + 32-hex salt pair
   return bin2hex(\scrypt_hash($pw, $salt, 16384, 8, 1, 64));
 }
 
@@ -146,7 +146,7 @@ function dd_seed_database(bool $demo = true): void {
   }
 }
 
-/** Boot-time seed for entirely fresh databases (mirrors the Node behaviour). */
+/** Boot-time seed for entirely fresh databases. */
 function dd_boot_seed(): void {
   try {
     $fresh = (int) dd_db()->query("SELECT COUNT(*) AS n FROM users")->fetch()['n'] === 0;

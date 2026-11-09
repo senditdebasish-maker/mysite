@@ -11,9 +11,9 @@ function dd_render_page(string $page, array $req): array {
   $path = '/' . ltrim($page, '/');
   if ($path === '/') $path = '/';
 
-  // hard blocks (mirrors the Node static blocklist)
-  if (preg_match('#^/(data|server|node_modules|\.git|\.github|deploy)(/|$)#i', $path)
-      || preg_match('#^/(package(-lock)?\.json|composer(\.json|\.lock)|README\.md|start-windows\.bat)$#i', $path)) {
+  // hard blocks
+  if (preg_match('#^/(data|\.git|\.github)(/|$)#i', $path)
+      || preg_match('#^/(composer(\.json|\.lock)|README\.md)$#i', $path)) {
     return dd_page_404();
   }
 
