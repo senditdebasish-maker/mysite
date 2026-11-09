@@ -170,6 +170,7 @@ XAMPP ships **Apache + PHP + MySQL — not Node.js**. Dropping this repo into `x
    - LAN: `http://<server-IP>:8000` — allow inbound TCP 8000 in Windows Firewall.
    - Public: reverse-proxy Apache → Node so your domain serves it — see `deploy/xampp-apache.conf` (whole-domain `<VirtualHost>`, or a `/mysite/` subpath with `https://yourdomain/mysite/setup.html?api=/mysite/api`). Uncomment `mod_proxy` / `mod_proxy_http` / `mod_headers` in `httpd.conf`, keep XAMPP Apache on port 80, Node on 8000.
    - Alternative without touching Apache: **Cloudflare Tunnel** (`cloudflared tunnel --url http://localhost:8000`) gives you an HTTPS URL.
+   - Already serving `http://localhost/mysite/` from htdocs and want to keep it? Proxy **only the API**: `ProxyPass /mysite/api/ http://127.0.0.1:8000/api/` (+ `ProxyPassReverse`) — see `deploy/xampp-apache.conf`, Scenario 4. The static pages then work exactly as they do today, with the Node backend behind them.
 7. **About MySQL/MariaDB in XAMPP:** this app uses its own embedded **SQLite** file — it does not use XAMPP’s MySQL, so you don't need to create a database or user for it. Your MySQL stays free for your other apps. (If you specifically require MySQL as the store backend, that's a data-layer migration — ask and I'll scope it.)
 8. **The wizard on XAMPP:** Node serves everything, so `/setup.html` + `/api/setup/*` work normally at <http://localhost:8000/setup.html>. If your domain proxies to Node (step 6), the wizard is at `https://yourdomain/setup.html`.
 
