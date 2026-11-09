@@ -3,6 +3,11 @@
   const { toast, fetchJSON, inr, esc } = window.UI;
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => [...document.querySelectorAll(s)];
+  /* API base: default "api" next to this page. If your live server mounts the
+     app under a subpath (or proxies /api elsewhere), open the wizard as
+     /setup.html?api=/your/subpath/api */
+  const API_BASE = (new URLSearchParams(location.search).get("api") || "api").replace(/\/+$/, "");
+  const apiUrl = (p) => `${API_BASE}/${String(p).replace(/^\/+/, "")}`;
   let status = null;
 
   const bytes = (n) => n == null ? "—" : n > 1048576 ? (n / 1048576).toFixed(2) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
@@ -14,14 +19,32 @@
   };
   const flashSaved = (id) => { const el = $(id); if (el) { el.hidden = false; setTimeout(() => (el.hidden = true), 1800); } };
 
-  async function loadStatus() {
-    try { status = await fetchJSON("api/setup/status"); }
-    catch (e) {
-      $("#setupHeading").textContent = "Setup unavailable";
-      $("#setupLede").textContent = e.status === 403 ? "Sign in as admin to change setup." : "Could not reach the server: " + e.message;
-      $$(".setup-card, .setup-finish").forEach(el => (el.hidden = true));
-      return;
+  const backupBtn = $("#backupBtn"); if (backupBtn) backupBtn.setAttribute("href", apiUrl("admin/backup"));
+
+  const statusUrl = () => new URL(apiUrl("setup/status"), location.href).href;
+  function showSetupError(e) {
+    $("#setupHeading").textContent = "Setup unavailable";
+    const pill = $("#setupPill"); pill.textContent = e.status === 403 ? "Admins only" : "Not connected"; pill.classList.remove("is-done");
+    $$(".setup-card, .setup-finish").forEach(el => (el.hidden = true));
+    const box = $("#setupTrouble");
+    box.hidden = false;
+    const msg = $("#troubleMsg");
+    const link = $("#troubleStatusUrl");
+    link.textContent = statusUrl();
+    link.href = statusUrl();
+    if (e.status === 404) {
+      msg.innerHTML = "The setup API answered <strong>404</strong> — this page is being served <strong>without the Node backend</strong>. Common causes: a static host (GitHub Pages / Netlify), an old build, or `setup.html` uploaded without the new `server/server.js`.";
+    } else if (e.status === 403) {
+      msg.innerHTML = "Setup is already complete. <a href='login.html?next=/setup.html'>Sign in as admin</a> to change these settings.";
+    } else {
+      msg.innerHTML = "Could not reach the server (" + esc(e.message || "network error") + "). Check that the Node app is running and that your proxy forwards <code>/api/*</code> to it.";
     }
+  }
+
+  async function loadStatus() {
+    try { status = await fetchJSON(apiUrl("setup/status")); }
+    catch (e) { showSetupError(e); return; }
+    $("#setupTrouble").hidden = true;
     hydrate();
   }
 
@@ -95,7 +118,7 @@
     const btn = $("#dbTestBtn"); const out = $("#dbTestResult");
     busy(btn, true, "Testing…"); out.textContent = ""; out.className = "setup-testresult";
     try {
-      const r = await fetchJSON("api/setup/test-db", { method: "POST", body: JSON.stringify({ path: $("#dbPath").value }) });
+      const r = await fetchJSON(apiUrl("setup/test-db"), { method: "POST", body: JSON.stringify({ path: $("#dbPath").value }) });
       out.classList.add("ok");
       out.textContent = r.counts
         ? `✓ Reachable — holds ${num(r.counts.users)} users, ${num(r.counts.products)} products, ${num(r.counts.orders)} orders`
@@ -109,7 +132,7 @@
     const payload = { path: $("#dbPath").value, mode, confirmReset: $("#dbReset").checked };
     busy(btn, true, "Applying…");
     try {
-      const r = await fetchJSON("api/setup/database", { method: "POST", body: JSON.stringify(payload) });
+      const r = await fetchJSON(apiUrl("setup/database"), { method: "POST", body: JSON.stringify(payload) });
       toast(`<strong>Database ready</strong> — ${r.seeded === "empty" ? "clean install" : r.seeded === "demo" ? "demo catalogue loaded" : "existing data kept"}`);
       await loadStatus();
       $("#dbApplyHint").textContent = "Applied at " + new Date().toLocaleTimeString("en-IN");
@@ -123,7 +146,7 @@
   $("#siteSaveBtn").addEventListener("click", async () => {
     const btn = $("#siteSaveBtn"); busy(btn, true, "Saving…");
     try {
-      await fetchJSON("api/setup/site", { method: "POST", body: JSON.stringify({
+      await fetchJSON(apiUrl("setup/site"), { method: "POST", body: JSON.stringify({
         brand: $("#siteBrand").value, tagline: $("#siteTagline").value, address: $("#siteAddress").value,
         gstin: $("#siteGstin").value, email: $("#siteEmail").value, phone: $("#sitePhone").value, whatsapp: $("#siteWhatsapp").value,
       }) });
@@ -147,7 +170,7 @@
     if (pw !== confirm) return toast("<strong>Passwords don't match</strong>");
     busy(btn, true, "Saving…");
     try {
-      const r = await fetchJSON("api/setup/admin", { method: "POST", body: JSON.stringify({
+      const r = await fetchJSON(apiUrl("setup/admin"), { method: "POST", body: JSON.stringify({
         name: $("#admName").value, phone: $("#admPhone").value, email: $("#admEmail").value, password: pw,
       }) });
       $("#admPassword").value = ""; $("#admConfirm").value = ""; pwFill.style.width = "0";
@@ -161,7 +184,7 @@
   $("#storeSaveBtn").addEventListener("click", async () => {
     const btn = $("#storeSaveBtn"); busy(btn, true, "Saving…");
     try {
-      await fetchJSON("api/setup/store", { method: "POST", body: JSON.stringify({
+      await fetchJSON(apiUrl("setup/store"), { method: "POST", body: JSON.stringify({
         announce: $("#stAnnounce").value, freeAt: $("#stFreeAt").value, deliveryFee: $("#stFee").value,
         codEnabled: $("#stCod").checked, codMin: $("#stCodMin").value, maxQty: $("#stMaxQty").value, storeLive: $("#stLive").checked,
       }) });
@@ -178,7 +201,7 @@
     if (!confirm(`Restore "${file.name}"? This REPLACES the entire database. A timestamped safety copy is kept. You will be signed out.`)) { e.target.value = ""; return; }
     const btn = $("#restoreBtn"); busy(btn, true, "Restoring…");
     try {
-      const res = await fetch("api/admin/restore", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
+      const res = await fetch(apiUrl("admin/restore"), { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Restore failed");
       toast("<strong>Database restored</strong> — signing you out…");
@@ -193,11 +216,18 @@
     if (!confirm("Complete setup? The public site will open and this wizard will lock behind your admin login.")) return;
     busy(btn, true, "Completing…");
     try {
-      await fetchJSON("api/setup/complete", { method: "POST", body: "{}" });
+      await fetchJSON(apiUrl("setup/complete"), { method: "POST", body: "{}" });
       toast("<strong>Setup complete</strong> 🎉 — the site is live");
       await loadStatus();
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) { toast("<strong>Could not complete</strong> — " + esc(e.message)); busy(btn, false); }
+  });
+
+  const retry = $("#troubleRetry");
+  if (retry) retry.addEventListener("click", async () => {
+    retry.disabled = true; retry.textContent = "Retrying…";
+    await loadStatus();
+    retry.disabled = false; retry.textContent = "Retry connection";
   });
 
   loadStatus();

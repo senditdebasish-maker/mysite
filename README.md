@@ -153,6 +153,10 @@ examples/                  design mockups shown before building
 - **Non-destructive checks:** “Test connection” opens/creates the target, runs `PRAGMA integrity_check` and reports table counts — without seeding anything (a brand-new file is removed after the test).
 - **Demo vs empty:** choosing *Empty store* on a database that already holds data requires an explicit “erase existing data” confirmation.
 
+## Setup page troubleshooting
+
+If `/setup.html` says **“Setup unavailable — the setup API answered 404”**, the page is being served without the Node backend. Fix, in order: **(1)** pull the latest code and **restart the Node app** (routes are cached at boot — cPanel/Passenger: press Restart); **(2)** run it with `npm start` on Node ≥ 22.5 — GitHub Pages/Netlify/`python -m http.server` can display the page but cannot run the installer; **(3)** re-upload the whole repo so `setup.html` and `server/server.js` match; **(4)** behind a proxy/subpath, forward `/api/*` untouched, or open `/setup.html?api=/your/subpath/api`.
+
 ## Local preview of the static-only variant
 
 The `index.html` still works without the backend for design previews (products fall back

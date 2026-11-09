@@ -439,3 +439,12 @@ table.tbl{ width:100%; border-collapse:collapse; font-size:.85rem; }
 
 .setup-foot{ text-align:center; font-size:.7rem; color:var(--muted); margin:1.1rem 0 0 }
 .setup-foot a{ color:var(--orange-deep) }
+
+/* setup troubleshooting panel */
+.setup-trouble{ background:#fff8e1; border:1px solid #f0d878; border-radius:16px; padding:1rem 1.15rem; margin:0 0 1rem; color:#4a3a06 }
+.setup-trouble strong{ font-family:var(--font-display); letter-spacing:-.01em }
+.setup-trouble p{ margin:.35rem 0; font-size:.86rem }
+.setup-trouble a{ color:#7a5b00; text-decoration:underline }
+.setup-fixlist{ margin:.4rem 0 .6rem; padding-left:1.15rem; font-size:.8rem; display:flex; flex-direction:column; gap:.32rem }
+.setup-fixlist code{ background:#f5e9bd; border-radius:4px; padding:0 .35em; font-size:.92em }
+.setup-fixactions{ display:flex; gap:.6rem; flex-wrap:wrap }

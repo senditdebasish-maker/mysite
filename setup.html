@@ -33,6 +33,23 @@
     <p id="setupLede">Everything on this page can be changed later from <strong>Admin → Storefront</strong> and here (sign in as admin). Nothing goes live until you press <strong>Complete setup</strong>.</p>
   </div>
 
+  <!-- Shown when the setup API can't be reached — usually a static host or stale deploy -->
+  <div class="setup-trouble" id="setupTrouble" hidden role="alert">
+    <strong>How to fix this</strong>
+    <p id="troubleMsg"></p>
+    <p class="setup-hint">The setup API this page needs is: <a class="mono" id="troubleStatusUrl" href="#" target="_blank" rel="noopener">—</a></p>
+    <ol class="setup-fixlist">
+      <li><strong>Restart the Node app</strong> after pulling the latest code — Node caches routes at boot, so an old process never sees <code>/api/setup/*</code> even with new files on disk. (cPanel / Passenger: press “Restart” on the app.)</li>
+      <li><strong>Serve it with the Node server</strong>, not a static host: <code>npm start</code> on Node ≥ 22.5. GitHub Pages / Netlify / <code>python -m http.server</code> can show this page but can never run the installer.</li>
+      <li><strong>Upload the whole repo</strong> — <code>setup.html</code> and <code>server/server.js</code> must come from the same version.</li>
+      <li><strong>Behind a proxy or subpath?</strong> Forward <code>/api/*</code> to the app untouched, or open <code class="mono">/setup.html?api=/your/subpath/api</code>.</li>
+    </ol>
+    <div class="setup-fixactions">
+      <button class="btn btn-primary" id="troubleRetry" type="button">Retry connection</button>
+      <a class="btn btn-ghost" href="https://github.com/senditdebasish-maker/mysite" target="_blank" rel="noopener">Get the latest code →</a>
+    </div>
+  </div>
+
   <div class="setup-grid">
 
     <!-- ══════════ STEP 1 · DATABASE ══════════ -->
