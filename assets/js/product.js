@@ -6,7 +6,8 @@
 
   // server injects window.__PID__ for /product/:id · static fallbacks: ?id=
   let pid = String(window.__PID__ || "").trim();
-  if (!/^[A-Za-z0-9_-]{1,32}$/.test(pid)) pid = new URLSearchParams(location.search).get("id") || "";
+  // On static hosts the server-injected token is never replaced — treat it as absent.
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(pid) || pid === "__PRODUCT_ID_TOKEN__") pid = new URLSearchParams(location.search).get("id") || "";
   pid = pid.trim();
   let current = null;
   let qty = 1;
@@ -148,7 +149,7 @@
   async function loadReviews(productId) {
     try {
       const res = await fetch(`api/products/${encodeURIComponent(productId)}/reviews`);
-      if (!res.ok) return;
+      if (!res.ok) { $("#rvList").innerHTML = `<p class="muted">Reviews appear on the live site.</p>`; return; }
       const { reviews } = await res.json();
       $("#rvList").innerHTML = (reviews || []).map(r => `
         <article class="review-card">
@@ -167,7 +168,7 @@
 
   function wireReviewForm(productId) {
     // show form only for signed-in users
-    fetch("api/me").then(r => r.json()).then(d => {
+    fetch("api/me").then(r => r.json()).catch(() => ({ user: null })).then(d => {
       const signedIn = !!d.user;
       $("#reviewForm").hidden = !signedIn;
       $("#reviewLoginPrompt").hidden = signedIn;

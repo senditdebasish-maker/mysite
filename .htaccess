@@ -1,0 +1,4 @@
+# Static hosts (InfinityFree/Apache/LiteSpeed): map canonical product URLs
+# to the single-product page. The Node server does this itself at runtime.
+RewriteEngine On
+RewriteRule ^product/([A-Za-z0-9_-]+)/?$ product.html?id=$1 [L,QSA]

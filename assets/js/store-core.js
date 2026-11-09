@@ -148,16 +148,31 @@ window.DD = (function () {
     const sub = subtotal();
     if (sub === 0) { couponMessage("Add something to the cart first", "error"); return; }
     const btn = $("#applyCoupon"); btn.disabled = true; btn.textContent = "…";
+    const OFFLINE_COUPONS = [
+      { code: "WELCOME10", type: "percent", value: 10, min_order: 0 },
+      { code: "FLAT100",   type: "flat",    value: 100, min_order: 999 },
+      { code: "SHELF150",  type: "flat",    value: 150, min_order: 1499 },
+    ];
     try {
-      const res = await fetch("api/coupons/validate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, subtotal: sub }) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Coupon not applicable");
+      let data = null, res = null;
+      try {
+        res = await fetch("api/coupons/validate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, subtotal: sub }) });
+        data = await res.json().catch(() => null);
+      } catch { data = null; }
+      if (!res || !res.ok) {
+        if (data && data.error) throw new Error(data.error);          // server said no — respect it
+        const off = OFFLINE_COUPONS.find(c => c.code === code);       // static/no-backend → offline rules
+        if (!off) throw new Error("That code can't be verified on this connection");
+        if (sub < off.min_order) throw new Error(`Spend at least ₹${off.min_order} to use ${off.code}`);
+        data = { code: off.code, type: off.type, value: off.value, min_order: off.min_order,
+                 discount: off.type === "percent" ? Math.round(sub * off.value / 100) : Math.min(off.value, sub) };
+      }
       coupon = { code: data.code, type: data.type, value: data.value, min_order: $n(data.min_order), discount: data.discount };
       couponMessage(`${data.code} applied — you save ${fmtINR(data.discount)} 🎉`, "ok");
       renderCart();
     } catch (err) {
       coupon = null;
-      couponMessage(err.message, "error");
+      couponMessage(err.message || "Coupon not applicable", "error");
       renderCart();
     } finally {
       btn.disabled = false; btn.textContent = "Apply";
@@ -225,13 +240,53 @@ window.DD = (function () {
     try {
       let me = null;
       try { me = (await (await fetch("api/me")).json()).user || null; } catch {}
-      const res = await fetch("api/orders", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer_name: name.value, phone: phone.value, address: address.value,
-          items: cart.map(i => ({ id: i.id, qty: i.qty })), coupon: coupon ? coupon.code : undefined, payment: payMethod }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Couldn't place the order");
+      // Static-host (no backend) fallback: the order goes straight to WhatsApp.
+      const offlineOrder = () => {
+        const lines = cartLines();
+        const sub = subtotal();
+        const discount = discountFor(coupon, sub);
+        const delivery = sub >= CONFIG.freeAt ? 0 : CONFIG.deliveryFee;
+        const total = Math.max(0, sub - discount + delivery);
+        const msg = [`Hi ${SITE.brand}! I'd like to order from your store:`,
+          ...lines.map(l => `• ${l.qty} × ${l.name} — ${fmtINR(l.price * l.qty)}`),
+          coupon ? `Coupon: ${coupon.code} (−${fmtINR(discount)})` : null,
+          `Delivery: ${delivery === 0 ? "FREE" : fmtINR(delivery)}`,
+          `Total: ${fmtINR(total)}`, `${payMethod === "upi" ? "UPI" : "Cash on Delivery"} on delivery`,
+          `Name: ${name.value} · ${phone.value}`, address.value ? `Address: ${address.value}` : null,
+          `Please confirm stock & delivery.`].filter(Boolean).join("\n");
+        return { wa: waLink(msg), total };
+      };
+      let res, data = null, backendOk = true;
+      try {
+        res = await fetch("api/orders", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customer_name: name.value, phone: phone.value, address: address.value,
+            items: cart.map(i => ({ id: i.id, qty: i.qty })), coupon: coupon ? coupon.code : undefined, payment: payMethod }),
+        });
+        try { data = await res.json(); } catch { data = null; }
+        if (!res.ok) {
+          if (!data) { backendOk = false; }   // static host / proxy 404 (HTML body) → WhatsApp fallback
+          else { const err = new Error(data.error || "Couldn't place the order"); err.status = res.status; throw err; }
+        }
+      } catch (err) {
+        if (err.status) throw err;            // server reached, business error (e.g. out of stock)
+        backendOk = false;                   // network / no backend at all
+      }
+      if (!backendOk) {
+        const offline = offlineOrder();
+        cart = []; coupon = null; saveCart(); renderCart();
+        $("#cartItems").style.display = "none"; $("#shipMeter").style.display = "none";
+        $("#cartEmpty").style.display = "none"; $("#cartFoot").hidden = true; checkoutForm.hidden = true;
+        if (orderSuccess) {
+          $("#osOrderId").textContent = "via WhatsApp";
+          $("#osDetails").innerHTML = `Total <strong>${fmtINR(offline.total)}</strong> · ${payMethod === "upi" ? "UPI" : "Cash on Delivery"} on delivery — the store will confirm stock on WhatsApp.<br />No account needed.`;
+          const track = $("#osTrack"); track.href = offline.wa; track.textContent = "Open WhatsApp again ↗";
+          orderSuccess.hidden = false;
+        }
+        window.open(offline.wa, "_blank", "noopener");
+        toast(`<b>Order sent via WhatsApp</b> — confirm with the store there`);
+        return;
+      }
       const o = data.order;
 
       const placedCoupon = o.coupon;

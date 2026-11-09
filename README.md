@@ -177,9 +177,7 @@ XAMPP ships **Apache + PHP + MySQL — not Node.js**. Dropping this repo into `x
 
 ## Local preview of the static-only variant
 
-The `index.html` still works without the backend for design previews (products fall back
-to the built-in list, cart/WhatsApp still function). Serve it with any static server, e.g.
-`python3 -m http.server 8000` — but accounts, orders and admin need `npm start`.
+The site also works without the backend for design previews and simple storefront duty: products fall back to the built-in catalogue, the cart persists in the browser, and a visitor's "Confirm & Place Order" composes a WhatsApp message with the full basket instead of hitting the API. Serve it with any static server, e.g. `python3 -m http.server 8000` — but accounts, orders, admin and the coupon/GST pipeline need `npm start`.
 
 ## Deploy
 
@@ -187,6 +185,33 @@ This is a **Node app**, not a static bundle. Any host that runs Node 22.5+ works
 
 - **VPS / cPanel (Node.js App) / Railway / Render / Fly** — `npm install && npm start`, set `PORT`, persist the `data/` folder (or point `DB_PATH` at a volume).
 - **Namecheap/Hostinger cPanel**: create a Node.js app, run it from the repo root, env `PORT` is assigned by cPanel; make sure the app root contains `index.html` + `assets/`.
-- Static-only hosts (GitHub Pages/Netlify drop-in) can still host the design pages, but account/order features will 404 — see note above.
+- Static-only hosts (GitHub Pages/Netlify drop-in) can still host the design pages — see the note below.
+
+## Publish on InfinityFree (static storefront)
+
+InfinityFree is **PHP + MySQL only — no Node.js on the free plan** (its premium plans advertise Node, and the free tier's MySQL is of no use to this app; data lives in SQLite). You can absolutely publish the **storefront** there — it degrades gracefully:
+
+| Works on InfinityFree | Does **not** work (no Node) |
+| --- | --- |
+| All design pages, catalogue (falls back to the built-in list of 14 products) | Login / signup / accounts / order history |
+| Product pages (`https://you.epizy.com/product/p1` via `.htaccess`, or `product.html?id=p1`) | Admin console, setup wizard, dashboards, invoices |
+| Cart + wishlist (saved in the visitor's browser) | Applying **coupons through the server** — offline seed codes `WELCOME10`, `FLAT100`, `SHELF150` are validated locally |
+| **Checkout → opens WhatsApp with the full order pre-filled** — cash on delivery / UPI, no account needed | Order numbers, GST invoices, stock counts, server-side analytics |
+
+Steps:
+
+1. Fix the WhatsApp number first: `SITE.whatsapp` in `assets/js/store-core.js` is a `910000000000` placeholder — change it to your number in international format (digits only) or orders will reach a stranger. (`assets/js/app.js` has its own copy if you edit the site-wide badge.)
+2. Create a free account at <https://www.infinityfree.net> → **Create Website** → pick a free subdomain (e.g. `yourname.epizy.com`) or connect a domain you own.
+3. Get FTP credentials from the control panel (**Accounts → FTP**) and connect with [FileZilla](https://filezilla-project.org).
+4. Upload **only these** to `htdocs/`: the top-level `*.html` files, `assets/`, `.htaccess`. Do **not** upload `server/`, `node_modules/`, `data/`, `.git/`, `deploy/`, `start-windows.bat`, `package*.json` — they are useless or sensitive on a static host.
+5. In the control panel, enable the free **Let's Encrypt SSL**, force HTTPS, and you're live at `https://yourname.epizy.com/`.
+6. Test: open the site, add to cart, Apply coupon `WELCOME10`, Confirm & Place Order → WhatsApp should open with the basket pre-filled.
+
+InfinityFree is fine as a brochure + WhatsApp-ordering storefront — **not** as the full store (inventory, real orders, admin). For the whole thing live, in order of cost:
+
+1. **Cloudflare Tunnel** (free, keeps everything): run the full app on the XAMPP machine per the section above, then `cloudflared tunnel --url http://localhost:8000` — you get an HTTPS URL on your domain, no port-forwarding. The PC must stay on with `npm start` running.
+2. **A small VPS** (~₹350–₹700/month) — Hostinger/Contabo/DigitalOcean: install Node ≥ 22.5, `npm install`, `npm start`, put nginx or cPanel in front, done. This is the only option that gives the *full* app with admin/accounts reliably, 24/7.
+3. **Node-capable PaaS free tiers** (Render, Koyeb) — run it, but the filesystem is ephemeral: `data/site.db` is wiped on redeploys/restarts, so orders and any edits vanish. Not usable for a real store.
+4. **Full PHP port** (WordPress/WooCommerce) — a rewrite, not a port; out of scope here.
 
 Health check: `GET /api/products` should return 14 seeded products on a fresh deploy. Demo coupons: `WELCOME10` (10% off), `FLAT100` (₹100 off ₹999+), `SHELF150` (₹150 off ₹1499+, 100 uses).
