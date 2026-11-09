@@ -146,9 +146,23 @@ CREATE TABLE IF NOT EXISTS orders (
   payment       TEXT NOT NULL DEFAULT 'cod',
   coupon_code   TEXT NOT NULL DEFAULT '',
   discount      INTEGER NOT NULL DEFAULT 0,
+  delivery_method TEXT NOT NULL DEFAULT 'standard',
   status        TEXT NOT NULL DEFAULT 'pending'
                 CHECK(status IN ('pending','confirmed','shipped','delivered','cancelled')),
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS addresses (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  label      TEXT NOT NULL DEFAULT 'Home',
+  name       TEXT NOT NULL,
+  phone      TEXT NOT NULL,
+  line       TEXT NOT NULL,
+  city       TEXT NOT NULL DEFAULT '',
+  state      TEXT NOT NULL DEFAULT '',
+  pincode    TEXT NOT NULL DEFAULT '',
+  is_default INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS inquiries (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -189,6 +203,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_user     ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status   ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created  ON orders(created_at);
 CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id);
+CREATE INDEX IF NOT EXISTS idx_addresses_user   ON addresses(user_id);
 ");
   }
 
@@ -203,6 +218,7 @@ CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id);
     if (!in_array('payment', $o, true))     self::$pdo->exec("ALTER TABLE orders ADD COLUMN payment TEXT NOT NULL DEFAULT 'cod'");
     if (!in_array('coupon_code', $o, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN coupon_code TEXT NOT NULL DEFAULT ''");
     if (!in_array('discount', $o, true))    self::$pdo->exec("ALTER TABLE orders ADD COLUMN discount INTEGER NOT NULL DEFAULT 0");
+    if (!in_array('delivery_method', $o, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN delivery_method TEXT NOT NULL DEFAULT 'standard'");
   }
 }
 

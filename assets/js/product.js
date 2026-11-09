@@ -215,6 +215,50 @@
   }
 
   /* ═══════════ boot ═══════════ */
+  /* ═══════════ pincode delivery estimate ═══════════ */
+  const fmtDate = (d) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const addBusinessDays = (days) => {   // couriers run Mon–Sat; skip Sundays
+    const d = new Date(); let added = 0;
+    while (added < days) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0) added++; }
+    return d;
+  };
+  const pincodeForm = $("#pincodeForm");
+  if (pincodeForm) {
+    pincodeForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = $("#pincodeInput"), msg = $("#pincodeMsg");
+      const pin = input.value.trim();
+      input.classList.remove("is-bad"); msg.className = "pincode-msg";
+      if (!/^[1-9]\d{5}$/.test(pin)) {
+        input.classList.add("is-bad"); msg.className = "pincode-msg is-bad";
+        msg.textContent = "Enter a valid 6-digit PIN code (it can't start with 0).";
+        return;
+      }
+      const stdFrom = addBusinessDays(3), stdTo = addBusinessDays(6);
+      const expFrom = addBusinessDays(1), expTo = addBusinessDays(2);
+      msg.className = "pincode-msg is-ok";
+      msg.textContent = `Delivering to ${pin} — Standard ${fmtDate(stdFrom)}–${fmtDate(stdTo)} · Express ${fmtDate(expFrom)}–${fmtDate(expTo)}. Confirmed on WhatsApp after you order.`;
+    });
+  }
+
+  /* ═══════════ recently viewed ═══════════ */
+  function renderRecent(excludeId) {
+    const track = $("#recentTrack"); if (!track) return;
+    const ids = (window.DD.recentlyViewed?.list() || []).filter(id => id !== excludeId);
+    const seen = [];
+    for (const id of ids) { const p = findProduct(id); if (p && !seen.includes(p)) seen.push(p); }
+    if (!seen.length) { $("#recentWrap").hidden = true; return; }
+    track.innerHTML = seen.slice(0, 6).map(x => `
+      <article class="deal-card reco-card">
+        <a class="deal-media" href="product/${esc(x.id)}" aria-label="View ${esc(x.name)}">${discountPct(x) ? `<span class="disc-badge">−${discountPct(x)}%</span>` : ""}<img src="${esc(x.img)}" alt="${esc(x.name)}" loading="lazy" width="300" height="300" /></a>
+        <div class="deal-body">
+          <a class="deal-name name-link" href="product/${esc(x.id)}">${esc(x.name)}</a>
+          <div class="deal-price"><span class="price">${money(x.price)}</span>${x.was ? `<span class="mrp">${money(x.was)}</span>` : ""}</div>
+        </div>
+      </article>`).join("");
+    $("#recentWrap").hidden = false;
+  }
+
   window.DD.ready.then(() => {
     current = pid ? findProduct(pid) : null;
     if (!current) {
@@ -228,8 +272,10 @@
     $("#rvAvg").textContent = $n(current.rating).toFixed(1);
     $("#rvStars").textContent = stars(current.rating);
     $("#rvCount").textContent = $n(current.reviews);
+    window.DD.recentlyViewed?.record(current.id);
     renderFBT(current);
     renderReco(current);
+    renderRecent(current.id);
     loadReviews(current.id);
     wireReviewForm(current.id);
     wireShare();
@@ -237,7 +283,7 @@
     $("#pdDec").addEventListener("click", () => { qty -= 1; updateQty(); });
     $("#pdInc").addEventListener("click", () => { qty += 1; updateQty(); });
     $("#pdAdd").addEventListener("click", () => window.DD.cart.add(current.id, qty));
-    $("#pdBuy").addEventListener("click", () => { if (window.DD.cart.add(current.id, qty)) window.DD.cart.open(); });
+    $("#pdBuy").addEventListener("click", () => { if (window.DD.cart.add(current.id, qty)) location.href = "checkout.html"; });
     $("#pdWish").addEventListener("click", () => {
       const on = wish.toggle(current.id);
       const wbtn = $("#pdWish");

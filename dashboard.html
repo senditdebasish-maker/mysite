@@ -38,68 +38,162 @@
         <h1 class="dash-title">Hey, <span id="firstName">friend</span>.</h1>
         <p class="dash-sub">Member since <span id="memberSince">—</span> · <span id="meEmail">—</span></p>
       </div>
-      <a class="btn btn-ink" href="index.html">← Back to the Store</a>
+      <a class="btn btn-ink" href="store.html">Browse the Store →</a>
     </div>
 
-    <div class="dash-grid">
-      <!-- ══════════ MY ORDERS ══════════ -->
-      <section class="panel" aria-labelledby="myOrdersTitle">
-        <div class="panel-head">
-          <h2 class="panel-title" id="myOrdersTitle">My Orders</h2>
-          <button class="btn btn-ghost btn-sm icon-refresh" id="refreshOrders" type="button">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
-            Refresh
-          </button>
-        </div>
+    <!-- tab bar -->
+    <div class="dash-tabs" role="tablist" aria-label="Account sections">
+      <button class="dash-tab is-active" role="tab" id="tabBtnOrders" aria-selected="true" aria-controls="tabOrders">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6L5 3H2"/></svg>
+        Orders
+      </button>
+      <button class="dash-tab" role="tab" id="tabBtnAddresses" aria-selected="false" aria-controls="tabAddresses">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>
+        Addresses
+      </button>
+      <button class="dash-tab" role="tab" id="tabBtnWishlist" aria-selected="false" aria-controls="tabWishlist">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20s-7.5-4.7-9.3-9.6C1.7 7.4 4.4 4.5 7.7 4.5c1.9 0 3.3 1 4.3 2.4 1-1.4 2.4-2.4 4.3-2.4 3.3 0 6 2.9 5 5.9C19.5 15.3 12 20 12 20z"/></svg>
+        Wishlist
+      </button>
+      <button class="dash-tab" role="tab" id="tabBtnProfile" aria-selected="false" aria-controls="tabProfile">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6.5 8-6.5s8 2.5 8 6.5"/></svg>
+        Profile &amp; Security
+      </button>
+    </div>
 
-        <div id="ordersWrap" aria-live="polite">
-          <p class="muted" style="padding:.6rem .2rem">Loading your orders…</p>
-        </div>
+    <!-- ══ TAB: ORDERS ══ -->
+    <section class="panel dash-panel" id="tabOrders" role="tabpanel" aria-labelledby="tabBtnOrders">
+      <div class="panel-head">
+        <h2 class="panel-title">My Orders</h2>
+        <button class="btn btn-ghost btn-sm icon-refresh" id="refreshOrders" type="button">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          Refresh
+        </button>
+      </div>
+      <div id="ordersWrap" aria-live="polite">
+        <p class="muted" style="padding:.6rem .2rem">Loading your orders…</p>
+      </div>
+      <div class="empty-state" id="ordersEmpty" hidden>
+        <svg viewBox="0 0 64 64" width="64" height="64" fill="none" stroke="#E8542F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 18h36l-4 34a6 6 0 0 1-6 5H24a6 6 0 0 1-6-5l-4-34z"/><path d="M24 28V16a8 8 0 0 1 16 0v12"/></svg>
+        <p><strong>No orders yet.</strong></p>
+        <p class="muted">The shelf has ceramic mugs, desk lamps and copper bottles waiting.</p>
+        <a class="btn btn-ink" href="store.html">Browse the Store</a>
+      </div>
+      <p class="muted" style="font-size:.72rem; margin:.4rem .1rem 0">Changed your mind? You can cancel any <strong>pending</strong> or <strong>confirmed</strong> order — stock is restored instantly. <a href="policies.html#returns" style="color:var(--orange-deep); font-weight:700">7-day returns</a> after delivery.</p>
+    </section>
 
-        <div class="empty-state" id="ordersEmpty" hidden>
-          <svg viewBox="0 0 64 64" width="64" height="64" fill="none" stroke="#E8542F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 18h36l-4 34a6 6 0 0 1-6 5H24a6 6 0 0 1-6-5l-4-34z"/><path d="M24 28V16a8 8 0 0 1 16 0v12"/></svg>
-          <p><strong>No orders yet.</strong></p>
-          <p class="muted">The shelf has ceramic mugs, desk lamps and copper bottles waiting.</p>
-          <a class="btn btn-ink" href="index.html">Browse the Store</a>
-        </div>
-      </section>
+    <!-- ══ TAB: ADDRESSES ══ -->
+    <section class="panel dash-panel" id="tabAddresses" role="tabpanel" aria-labelledby="tabBtnAddresses" hidden>
+      <div class="panel-head">
+        <h2 class="panel-title">Address book <span class="muted" style="font-size:.72rem; font-weight:600">(max 10)</span></h2>
+        <button class="btn btn-ink btn-sm" id="addrAddToggle" type="button">+ Add address</button>
+      </div>
+      <p class="co-error" id="addrError" hidden></p>
 
-      <!-- ══════════ RIGHT COLUMN ══════════ -->
-      <div style="display:flex; flex-direction:column; gap:.9rem">
-        <!-- profile -->
-        <section class="panel" aria-labelledby="profileTitle">
-          <h2 class="panel-title" id="profileTitle">Profile</h2>
+      <div class="addr-grid" id="addrGrid" aria-live="polite"></div>
+      <div class="empty-state" id="addrEmpty" hidden>
+        <svg viewBox="0 0 64 64" width="56" height="56" fill="none" stroke="#E8542F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M32 56s18-14.1 18-29A18 18 0 1 0 14 27c0 14.9 18 29 18 29z"/><circle cx="32" cy="27" r="6.5"/></svg>
+        <p><strong>No saved addresses yet.</strong></p>
+        <p class="muted">Save your home or office address — checkout becomes one tap next time.</p>
+      </div>
+
+      <form class="address-form" id="addressForm" hidden novalidate>
+        <p class="address-form-title" id="addressFormTitle">New address</p>
+        <div class="field-row">
+          <label class="field">Label<input type="text" id="aLabel" placeholder="Home / Office…" maxlength="24" autocomplete="off" /></label>
+          <label class="field">Recipient<input type="text" id="aName" placeholder="Rohit Sharma" required autocomplete="name" /></label>
+        </div>
+        <div class="field-row">
+          <label class="field">Phone<input type="tel" id="aPhone" placeholder="+91 98765 43210" required autocomplete="tel" /></label>
+          <label class="field">PIN code<input type="text" id="aPin" placeholder="700029" inputmode="numeric" maxlength="6" required autocomplete="postal-code" /></label>
+        </div>
+        <label class="field">Address line<input type="text" id="aLine" placeholder="House / flat, street, area, landmark" required autocomplete="street-address" /></label>
+        <div class="field-row">
+          <label class="field">City<input type="text" id="aCity" placeholder="Kolkata" required autocomplete="address-level2" /></label>
+          <label class="field">State<input type="text" id="aState" placeholder="West Bengal" autocomplete="address-level1" /></label>
+        </div>
+        <label class="save-to-book" style="color:var(--ink-soft)"><input type="checkbox" id="aDefault" /> Make this my default address</label>
+        <div class="address-form-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="addrCancelEdit">Cancel</button>
+          <button type="submit" class="btn btn-ink btn-sm" id="addrSaveBtn">Save address</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ══ TAB: WISHLIST ══ -->
+    <section class="panel dash-panel" id="tabWishlist" role="tabpanel" aria-labelledby="tabBtnWishlist" hidden>
+      <div class="panel-head">
+        <h2 class="panel-title">Wishlist</h2>
+        <a class="btn btn-ghost btn-sm" href="store.html">Browse the shelf →</a>
+      </div>
+      <div class="wish-grid" id="wishGrid"></div>
+      <div class="empty-state" id="wishEmpty" hidden>
+        <svg viewBox="0 0 64 64" width="56" height="56" fill="none" stroke="#E8542F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M32 55S10 41.6 10 25.3C10 15.9 17 10 24.2 10c3.4 0 5.7 1.3 7.8 4.4C34.1 11.3 36.4 10 39.8 10 47 10 54 15.9 54 25.3 54 41.6 32 55 32 55z"/></svg>
+        <p><strong>Your wishlist is empty.</strong></p>
+        <p class="muted">Tap the heart on anything you like — it’ll wait for you here.</p>
+        <a class="btn btn-ink" href="store.html">Find something →</a>
+      </div>
+    </section>
+
+    <!-- ══ TAB: PROFILE & SECURITY ══ -->
+    <section class="panel dash-panel" id="tabProfile" role="tabpanel" aria-labelledby="tabBtnProfile" hidden>
+      <div class="profile-grid">
+        <div>
+          <h2 class="panel-title" style="margin-bottom:.55rem">Profile</h2>
           <form class="profile-form" id="profileForm" novalidate>
             <label class="field">Name<input type="text" id="p-name" required autocomplete="name" /></label>
             <label class="field">Phone<input type="tel" id="p-phone" placeholder="+91 98765 43210" autocomplete="tel" /></label>
             <label class="field">Email<input type="email" id="p-email" disabled /></label>
             <button class="btn btn-ink" type="submit" style="justify-content:center">Save changes</button>
           </form>
-        </section>
-
-        <!-- help -->
-        <section class="panel" aria-labelledby="helpTitle">
-          <h2 class="panel-title" id="helpTitle">Need help with an order?</h2>
-          <div class="help-list">
-            <a class="help-link" id="helpWa" href="https://wa.me/910000000000" target="_blank" rel="noopener">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="#1f9d55" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 2.1.55 4.14 1.6 5.95L2 22l4.3-1.13a9.87 9.87 0 0 0 5.74 1.78h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2z"/></svg>
-              Chat on WhatsApp
-            </a>
-            <a class="help-link" id="helpMail" href="mailto:hello@example.com">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M3.5 7l8.5 6 8.5-6"/></svg>
-              Email support
-            </a>
+        </div>
+        <div>
+          <h2 class="panel-title" style="margin-bottom:.55rem">Security</h2>
+          <form class="profile-form" id="passwordForm" novalidate>
+            <label class="field">Current password<input type="password" id="pwCurrent" autocomplete="current-password" required /></label>
+            <label class="field">New password<input type="password" id="pwNew" autocomplete="new-password" minlength="6" required /></label>
+            <label class="field">Confirm new password<input type="password" id="pwConfirm" autocomplete="new-password" minlength="6" required /></label>
+            <p class="muted" style="font-size:.72rem; margin:0">At least 6 characters. After a successful change you stay signed in on this device.</p>
+            <button class="btn btn-ink" type="submit" style="justify-content:center">Change password</button>
+          </form>
+          <div class="security-tips">
+            <p class="security-tips-title">Good password hygiene</p>
+            <ul>
+              <li>Use a phrase you’ll remember — not your phone number.</li>
+              <li>Never share OTPs or passwords, even with “support”.</li>
+              <li>We never store your password in plain text.</li>
+            </ul>
           </div>
-          <p class="muted" style="font-size:.74rem; margin:.6rem 0 0">Mention your <strong>order number</strong> and I’ll pull it up instantly.</p>
-        </section>
+        </div>
       </div>
-    </div>
+    </section>
+
+    <!-- help (always visible) -->
+    <section class="panel dash-help" aria-labelledby="helpTitle">
+      <h2 class="panel-title" id="helpTitle" style="margin-bottom:.5rem">Need help with an order?</h2>
+      <div class="help-list" style="flex-direction:row; flex-wrap:wrap; gap:.5rem">
+        <a class="help-link" id="helpWa" href="https://wa.me/910000000000" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="#1f9d55" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 2.1.55 4.14 1.6 5.95L2 22l4.3-1.13a9.87 9.87 0 0 0 5.74 1.78h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2z"/></svg>
+          Chat on WhatsApp
+        </a>
+        <a class="help-link" id="helpMail" href="mailto:hello@example.com">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M3.5 7l8.5 6 8.5-6"/></svg>
+          Email support
+        </a>
+        <a class="help-link" href="policies.html#returns">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+          Returns &amp; refunds policy
+        </a>
+      </div>
+      <p class="muted" style="font-size:.74rem; margin:.5rem 0 0">Mention your <strong>order number</strong> and I’ll pull it up instantly.</p>
+    </section>
   </main>
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="assets/js/ui.js" defer></script>
+<script src="assets/js/store-core.js" defer></script>
 <script src="assets/js/dashboard.js" defer></script>
 </body>
 </html>

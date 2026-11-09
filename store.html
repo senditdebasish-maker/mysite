@@ -150,7 +150,7 @@
 
       <div class="filter-note">
         <strong>🚚 Delivery estimate</strong><br />
-        Order by 9 PM — ships tomorrow.<br />Arriving by <span id="etaDate">soon</span>.
+        Order by 9 PM — ships tomorrow.<br />Standard arrives by <span id="etaDate">soon</span>.<br />Express (1–2 days) at checkout for ₹99.
       </div>
     </aside>
 
@@ -186,7 +186,7 @@
         <button class="btn btn-ink" id="emptyClear" type="button">Clear filters</button>
       </div>
 
-      <p class="store-note">Prices include GST · free delivery above ₹999 (else ₹49) · 7-day damaged returns (unboxing video helps) · restocks on Sundays. <a href="contact.html" style="color:var(--orange-deep); font-weight:700">Bulk orders →</a></p>
+      <p class="store-note">Prices include GST · free delivery above ₹999 (else ₹49) · <strong>Express 1–2 days ₹99</strong> · 7-day easy returns · <a href="policies.html" style="color:var(--orange-deep); font-weight:700">Shipping &amp; returns →</a> · <a href="contact.html" style="color:var(--orange-deep); font-weight:700">Bulk orders →</a></p>
     </div>
   </div>
 
@@ -197,7 +197,7 @@
   <div class="site-foot-inner">
     <div>
       <a class="wordmark" href="index.html">debasish<span class="wm-dot">.</span></a>
-      <p class="muted" style="font-size:.78rem; max-width:26ch; margin:.35rem 0 0">Web design, hosting &amp; a handpicked store — Kolkata, serving PAN-India.</p>
+      <p class="muted" style="font-size:.78rem; max-width:28ch; margin:.35rem 0 0">Web design, hosting &amp; a handpicked store — Kolkata, serving PAN-India.</p>
     </div>
     <div class="foot-col">
       <h4>Explore</h4>
@@ -208,9 +208,16 @@
       <a href="contact.html">Contact</a>
     </div>
     <div class="foot-col">
+      <h4>Store</h4>
+      <a href="store.html">Shop all</a>
+      <a href="checkout.html">Checkout</a>
+      <a href="dashboard.html">My orders &amp; returns</a>
+      <a href="policies.html">Shipping · Returns · Privacy</a>
+    </div>
+    <div class="foot-col">
       <h4>Account</h4>
       <a href="login.html">Login / Create account</a>
-      <a href="dashboard.html">My orders &amp; profile</a>
+      <a href="dashboard.html">Addresses &amp; profile</a>
     </div>
     <div class="foot-col">
       <h4>Reach</h4>
@@ -221,7 +228,7 @@
   </div>
   <div class="foot-bottom">
     <span>© <span id="yearNow">2026</span> <strong>Debasish Das</strong> — Web Studio &amp; Store</span>
-    <span>Sample prices &amp; placeholder contacts — personalise before launch</span>
+    <span><a href="policies.html#shipping" style="color:inherit">Shipping</a> · <a href="policies.html#returns" style="color:inherit">Returns</a> · <a href="policies.html#privacy" style="color:inherit">Privacy</a> · <a href="policies.html#terms" style="color:inherit">Terms</a> · Placeholder contacts — personalise before launch</span>
   </div>
 </footer>
 
@@ -263,43 +270,14 @@
       <div class="total-row total-grand"><span>Total</span><strong id="cartTotal">₹0</strong></div>
     </div>
 
-    <label class="pay-method" for="payMethod">
-      <span>Payment method</span>
-      <select id="payMethod">
-        <option value="cod" selected>Cash on Delivery (COD)</option>
-        <option value="upi">UPI on Delivery</option>
-      </select>
-    </label>
-
-    <button class="btn btn-wa" id="placeOrder">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 2.1.55 4.14 1.6 5.95L2 22l4.3-1.13a9.87 9.87 0 0 0 5.74 1.78h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2z"/></svg>
-      Place Order
+    <button class="btn btn-ink cart-checkout-cta" id="placeOrder" type="button">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.4"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+      Proceed to Checkout →
     </button>
-    <p class="cart-note">We confirm on WhatsApp — UPI / cash accepted at the door. Order saved to your account.</p>
+    <p class="cart-note">Cash / UPI on delivery · GST invoice with every order · 7-day easy returns</p>
   </div>
 
-  <!-- checkout details (revealed by Place Order) -->
-  <form class="checkout-form" id="checkoutForm" hidden novalidate>
-    <p class="co-title">Delivery details</p>
-    <label>Your name<input type="text" id="co-name" placeholder="Rohit Sharma" required autocomplete="name" /></label>
-    <div class="co-row">
-      <label>Phone<input type="tel" id="co-phone" placeholder="+91 98765 43210" required autocomplete="tel" /></label>
-      <label>Address <span class="co-opt">(optional)</span><input type="text" id="co-address" placeholder="House, street, area, PIN" autocomplete="street-address" /></label>
-    </div>
-    <div class="checkout-actions">
-      <button type="button" class="btn btn-ghost co-back" id="coBack">← Back</button>
-      <button type="submit" class="btn btn-wa co-confirm" id="coConfirm">Confirm &amp; Place Order</button>
-    </div>
-  </form>
-
-  <!-- order success state -->
-  <div class="order-success" id="orderSuccess" hidden>
-    <svg viewBox="0 0 64 64" width="66" height="66" fill="none" stroke="#1f9d55" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="32" cy="32" r="28" opacity=".35"/><path d="M20 33.5l8.5 8L44 24"/></svg>
-    <p class="os-title">Order <span class="os-id" id="osOrderId">#0</span> placed!</p>
-    <p class="os-sub" id="osDetails">Total <strong id="osTotal">₹0</strong> · We’ve reserved your items.<br />Confirm on WhatsApp — then track delivery status in your account.</p>
-    <a class="btn btn-ink" id="osTrack" href="login.html">Track my orders →</a>
-    <button class="os-continue" id="osContinue">← Continue shopping</button>
-  </div>
+  <!-- full checkout lives on checkout.html -->
 </div>
 
 <!-- ══════════ QUICK VIEW MODAL ══════════ -->

@@ -18,9 +18,9 @@ function dd_hash_pw(string $pw, string $salt): string {
 }
 
 function dd_mk_user(string $name, string $email, string $phone, string $password, string $role): void {
-  $hash = password_hash($password, PASSWORD_BCRYPT);
+  $pair = dd_password_pair($password);
   $stmt = dd_db()->prepare("INSERT INTO users (name,email,phone,password_hash,password_salt,role) VALUES (?,?,?,?,?,?)");
-  $stmt->execute([$name, strtolower($email), $phone, $hash, 'bcrypt', $role]);
+  $stmt->execute([$name, strtolower($email), $phone, $pair['hash'], $pair['salt'], $role]);
 }
 
 function dd_is_legacy_scrypt_user(array $u): bool {
@@ -31,6 +31,7 @@ const DD_DEFAULT_SETTINGS = [
   'announce'      => 'Free delivery over ₹999 ✦ 7-day easy returns ✦ COD & UPI on delivery',
   'free_at'       => '999',
   'deliver_fee'   => '49',
+  'express_fee'   => '99',
   'cod_enabled'   => '1',
   'cod_min'       => '0',
   'max_qty'       => '99',

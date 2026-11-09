@@ -1,6 +1,7 @@
 /* store-core.js — shared engine for the shelf (storefront + product pages)
    Config + catalog loading · cart (dd_cart_v1) · wishlist (dd_wishlist_v1)
-   Cart drawer · coupons · checkout · WhatsApp hand-off · GST-inclusive math */
+   Cart drawer · coupons · WhatsApp hand-off · GST-inclusive math
+   Full checkout lives on checkout.html (checkout.js) — the drawer links there. */
 window.DD = (function () {
   const SITE = { whatsapp: "910000000000", brand: "Debasish Das" };   // ⚠️ placeholder — keep in sync with app.js
   const $  = (s, c = document) => c.querySelector(s);
@@ -61,6 +62,8 @@ window.DD = (function () {
   let cart = [];
   try { cart = JSON.parse(localStorage.getItem("dd_cart_v1") || "[]"); } catch { cart = []; }
   let coupon = null;  // { code, type, value, min_order, discount }
+  try { const c = JSON.parse(localStorage.getItem("dd_coupon_v1") || "null"); if (c && typeof c === "object" && c.code) coupon = c; } catch { coupon = null; }
+  const saveCoupon = () => { try { coupon ? localStorage.setItem("dd_coupon_v1", JSON.stringify(coupon)) : localStorage.removeItem("dd_coupon_v1"); } catch {} };
   const saveCart = () => { try { localStorage.setItem("dd_cart_v1", JSON.stringify(cart)); } catch {} };
 
   const cartLines = () => cart.map(i => { const p = findProduct(i.id); return p ? { ...p, qty: i.qty } : null; }).filter(Boolean);
@@ -74,7 +77,7 @@ window.DD = (function () {
     const count = cartCount(), sub = subtotal();
 
     if (coupon && sub < (coupon.min_order || 0)) {
-      coupon = null;
+      coupon = null; saveCoupon();
       const msg = $("#couponMsg");
       if (msg) { msg.textContent = "Coupon removed — basket no longer meets its minimum."; msg.className = "coupon-msg is-error"; }
     }
@@ -141,13 +144,12 @@ window.DD = (function () {
     el.className = "coupon-msg" + (kind === "ok" ? " is-ok" : kind === "error" ? " is-error" : "");
   };
 
-  async function applyCoupon() {
-    const input = $("#couponInput"); if (!input) return;
-    const code = input.value.trim().toUpperCase();
-    if (!code) { couponMessage("Enter a code first", "error"); return; }
+  async function applyCouponCode(code, { messageEl } = {}) {
+    code = String(code || "").trim().toUpperCase();
+    const note = (msg, kind) => { const m = messageEl || $("#couponMsg"); if (m) { m.textContent = msg; m.className = "coupon-msg is-" + (kind || "ok"); } };
+    if (!code) { note("Enter a code first", "error"); return null; }
     const sub = subtotal();
-    if (sub === 0) { couponMessage("Add something to the cart first", "error"); return; }
-    const btn = $("#applyCoupon"); btn.disabled = true; btn.textContent = "…";
+    if (sub === 0) { note("Add something to the cart first", "error"); return null; }
     const OFFLINE_COUPONS = [
       { code: "WELCOME10", type: "percent", value: 10, min_order: 0 },
       { code: "FLAT100",   type: "flat",    value: 100, min_order: 999 },
@@ -168,15 +170,22 @@ window.DD = (function () {
                  discount: off.type === "percent" ? Math.round(sub * off.value / 100) : Math.min(off.value, sub) };
       }
       coupon = { code: data.code, type: data.type, value: data.value, min_order: $n(data.min_order), discount: data.discount };
-      couponMessage(`${data.code} applied — you save ${fmtINR(data.discount)} 🎉`, "ok");
+      note(`${data.code} applied — you save ${fmtINR(data.discount)} 🎉`, "ok");
+      saveCoupon();
       renderCart();
+      return coupon;
     } catch (err) {
-      coupon = null;
-      couponMessage(err.message || "Coupon not applicable", "error");
+      coupon = null; saveCoupon();
+      note(err.message || "Coupon not applicable", "error");
       renderCart();
-    } finally {
-      btn.disabled = false; btn.textContent = "Apply";
+      return null;
     }
+  }
+  async function applyCoupon() {
+    const input = $("#couponInput"); if (!input) return;
+    const btn = $("#applyCoupon"); btn.disabled = true; btn.textContent = "…";
+    await applyCouponCode(input.value);
+    btn.disabled = false; btn.textContent = "Apply";
   }
 
   /* ═══════════ drawer wiring ═══════════ */
@@ -205,129 +214,17 @@ window.DD = (function () {
     $("#couponInput")?.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyCoupon(); } });
   }
 
-  /* ═══════════ checkout ═══════════ */
+  /* ═══════════ checkout → dedicated full page ═══════════ */
   const waLink = (text) => `https://wa.me/${SITE.whatsapp}?text=${encodeURIComponent(text)}`;
-  const checkoutForm = $("#checkoutForm");
-  const orderSuccess = $("#orderSuccess");
+  $("#placeOrder")?.addEventListener("click", () => { if (cartCount() > 0) location.href = "checkout.html"; });
 
-  function showCheckout() {
-    if (!checkoutForm || cartCount() === 0) return;
-    $("#cartItems").style.display = "none"; $("#shipMeter").style.display = "none";
-    $("#cartEmpty").style.display = "none"; $("#cartFoot").hidden = true;
-    checkoutForm.hidden = false;
-    $("#co-name")?.focus();
-    fetch("api/me").then(r => r.json()).then(d => {
-      const me = d.user;
-      if (me) { $("#co-name").value = $("#co-name").value || me.name; $("#co-phone").value = $("#co-phone").value || me.phone || ""; }
-    }).catch(() => {});
-  }
-  function hideCheckout() {
-    if (!checkoutForm) return;
-    checkoutForm.hidden = true;
-    $("#cartFoot").hidden = false;
-    renderCart();
-  }
-  $("#placeOrder")?.addEventListener("click", showCheckout);
-  $("#coBack")?.addEventListener("click", hideCheckout);
-
-  checkoutForm?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = $("#co-name"), phone = $("#co-phone"), address = $("#co-address");
-    if (!name.value.trim())  { name.focus(); toast("Please tell me your name"); return; }
-    if (!phone.value.trim()) { phone.focus(); toast("Please share a contact phone"); return; }
-    const payMethod = $("#payMethod").value;
-    const btn = $("#coConfirm"); btn.disabled = true; btn.textContent = "Placing order…";
-    try {
-      let me = null;
-      try { me = (await (await fetch("api/me")).json()).user || null; } catch {}
-      // Static-host (no backend) fallback: the order goes straight to WhatsApp.
-      const offlineOrder = () => {
-        const lines = cartLines();
-        const sub = subtotal();
-        const discount = discountFor(coupon, sub);
-        const delivery = sub >= CONFIG.freeAt ? 0 : CONFIG.deliveryFee;
-        const total = Math.max(0, sub - discount + delivery);
-        const msg = [`Hi ${SITE.brand}! I'd like to order from your store:`,
-          ...lines.map(l => `• ${l.qty} × ${l.name} — ${fmtINR(l.price * l.qty)}`),
-          coupon ? `Coupon: ${coupon.code} (−${fmtINR(discount)})` : null,
-          `Delivery: ${delivery === 0 ? "FREE" : fmtINR(delivery)}`,
-          `Total: ${fmtINR(total)}`, `${payMethod === "upi" ? "UPI" : "Cash on Delivery"} on delivery`,
-          `Name: ${name.value} · ${phone.value}`, address.value ? `Address: ${address.value}` : null,
-          `Please confirm stock & delivery.`].filter(Boolean).join("\n");
-        return { wa: waLink(msg), total };
-      };
-      let res, data = null, backendOk = true;
-      try {
-        res = await fetch("api/orders", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ customer_name: name.value, phone: phone.value, address: address.value,
-            items: cart.map(i => ({ id: i.id, qty: i.qty })), coupon: coupon ? coupon.code : undefined, payment: payMethod }),
-        });
-        try { data = await res.json(); } catch { data = null; }
-        if (!res.ok) {
-          if (!data) { backendOk = false; }   // static host / proxy 404 (HTML body) → WhatsApp fallback
-          else { const err = new Error(data.error || "Couldn't place the order"); err.status = res.status; throw err; }
-        }
-      } catch (err) {
-        if (err.status) throw err;            // server reached, business error (e.g. out of stock)
-        backendOk = false;                   // network / no backend at all
-      }
-      if (!backendOk) {
-        const offline = offlineOrder();
-        cart = []; coupon = null; saveCart(); renderCart();
-        $("#cartItems").style.display = "none"; $("#shipMeter").style.display = "none";
-        $("#cartEmpty").style.display = "none"; $("#cartFoot").hidden = true; checkoutForm.hidden = true;
-        if (orderSuccess) {
-          $("#osOrderId").textContent = "via WhatsApp";
-          $("#osDetails").innerHTML = `Total <strong>${fmtINR(offline.total)}</strong> · ${payMethod === "upi" ? "UPI" : "Cash on Delivery"} on delivery — the store will confirm stock on WhatsApp.<br />No account needed.`;
-          const track = $("#osTrack"); track.href = offline.wa; track.textContent = "Open WhatsApp again ↗";
-          orderSuccess.hidden = false;
-        }
-        window.open(offline.wa, "_blank", "noopener");
-        toast(`<b>Order sent via WhatsApp</b> — confirm with the store there`);
-        return;
-      }
-      const o = data.order;
-
-      const placedCoupon = o.coupon;
-      cart = []; coupon = null;
-      saveCart(); renderCart();
-      $("#cartItems").style.display = "none"; $("#shipMeter").style.display = "none";
-      $("#cartEmpty").style.display = "none"; $("#cartFoot").hidden = true;
-      checkoutForm.hidden = true;
-      if (orderSuccess) {
-        $("#osOrderId").textContent = "#" + o.id;
-        $("#osTotal").textContent = fmtINR(o.total);
-        $("#osDetails").innerHTML = `Total <strong>${fmtINR(o.total)}</strong>${o.discount ? ` (you saved ${fmtINR(o.discount)} with ${esc(placedCoupon || "coupon")})` : ""} · ${o.payment === "upi" ? "UPI on delivery" : "Cash on Delivery"}<br />Confirm on WhatsApp — then track delivery status in your account.`;
-        const track = $("#osTrack");
-        track.href = me ? "dashboard.html" : "login.html?next=dashboard.html";
-        track.textContent = me ? "Track my orders →" : "Sign in to track orders →";
-        orderSuccess.hidden = false;
-      }
-      refreshProducts().then(() => window.dispatchEvent(new CustomEvent("dd:products-changed")));
-
-      const lines = o.items.map(i => `• ${i.qty} × ${i.name} — ${fmtINR(i.price * i.qty)}`);
-      const msg = [`Hi ${SITE.brand}! I just placed order #${o.id} on your website:`, ...lines,
-        placedCoupon ? `Coupon: ${placedCoupon} (−${fmtINR(o.discount)})` : null,
-        `Total: ${fmtINR(o.total)} · ${o.payment === "upi" ? "UPI on delivery" : "COD"}`,
-        `Name: ${name.value} · ${phone.value}`, address.value ? `Address: ${address.value}` : null,
-        `Please confirm stock & delivery.`].filter(Boolean).join("\n");
-      window.open(waLink(msg), "_blank", "noopener");
-      toast(`<b>Order #${o.id} placed</b> — confirm on WhatsApp`);
-    } catch (err) {
-      toast(err.message || "Couldn't place the order");
-    } finally {
-      btn.disabled = false; btn.textContent = "Confirm & Place Order";
-    }
-  });
-
-  $("#osContinue")?.addEventListener("click", () => {
-    if (orderSuccess) orderSuccess.hidden = true;
-    $("#cartEmpty").style.display = "";
-    $("#cartFoot").hidden = false;
-    renderCart();
-    closeCart();
-  });
+  /* ═══════════ recently viewed ═══════════ */
+  const RV_KEY = "dd_recently_viewed";
+  const rvRead = () => { try { const a = JSON.parse(localStorage.getItem(RV_KEY) || "[]"); return Array.isArray(a) ? a.filter(x => typeof x === "string") : []; } catch { return []; } };
+  const recentlyViewed = {
+    record(id) { const list = [id, ...rvRead().filter(x => x !== id)].slice(0, 10); try { localStorage.setItem(RV_KEY, JSON.stringify(list)); } catch {} },
+    list() { return rvRead(); },
+  };
 
   /* ═══════════ boot: config + catalog ═══════════ */
   async function refreshProducts() {
@@ -354,8 +251,6 @@ window.DD = (function () {
         if (bar) { bar.classList.add("announce-warn"); }
         if (text) text.textContent = "Store is restocking right now — checkout is temporarily unavailable";
       }
-      const codOpt = $("#payMethod")?.querySelector('option[value="cod"]');
-      if (codOpt && !cfg.codEnabled) { codOpt.textContent = "Cash on Delivery — unavailable"; codOpt.disabled = true; $("#payMethod").value = "upi"; }
       const eta = $("#etaDate"); if (eta) eta.textContent = ETA;
     } catch { /* offline defaults */ }
     await refreshProducts();
@@ -363,12 +258,16 @@ window.DD = (function () {
   })();
 
   return {
-    $, $$, fmtINR, esc, ETA, discountPct, stars, findProduct, toast,
+    $, $$, fmtINR, esc, ETA, discountPct, stars, findProduct, toast, waLink,
+    coupon: () => coupon,
+    applyCouponCode,
+    clearCoupon() { coupon = null; saveCoupon(); },
     config: () => CONFIG,
     products: () => PRODUCTS,
     ready,
     refreshProducts,
     wish,
-    cart: { add: addToCart, open: openCart, close: closeCart, render: renderCart, count: cartCount, subtotal },
+    recentlyViewed,
+    cart: { add: addToCart, open: openCart, close: closeCart, render: renderCart, count: cartCount, subtotal, lines: cartLines, clear() { cart = []; saveCart(); renderCart(); } },
   };
 })();

@@ -303,84 +303,10 @@ $("#cartOpen").addEventListener("click", openCart);
 $("#cartClose").addEventListener("click", closeCart);
 $("#cartSummary").addEventListener("click", openCart);
 
-/* ═════════ Checkout: details → POST /api/orders → WhatsApp ═════════ */
-const checkoutForm = $("#checkoutForm");
-const orderSuccess = $("#orderSuccess");
-
-function showCheckout(){
+/* ═════════ Checkout → dedicated full page (checkout.html) ═════════ */
+$("#placeOrder").addEventListener("click", () => {
   if (!cartItems().length) { showToast("Your cart is empty"); return; }
-  orderSuccess.hidden = true;
-  checkoutForm.hidden = false;
-  $("#cartFoot").hidden = true;
-  if (ME){
-    if (!$("#co-name").value)  $("#co-name").value  = ME.name  || "";
-    if (!$("#co-phone").value) $("#co-phone").value = ME.phone || "";
-  }
-  $("#co-name").focus();
-}
-function hideCheckout(){
-  checkoutForm.hidden = true;
-  $("#cartFoot").hidden = cartItems().length === 0;
-}
-$("#placeOrder").addEventListener("click", showCheckout);
-$("#coBack").addEventListener("click", hideCheckout);
-
-checkoutForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const name = $("#co-name"), phone = $("#co-phone"), address = $("#co-address");
-  if (!name.value.trim())  { name.focus();  showToast("Please tell me your name"); return; }
-  if (!phone.value.trim()) { phone.focus(); showToast("Please share a contact phone"); return; }
-  const btn = $("#coConfirm"); btn.disabled = true; btn.textContent = "Placing order…";
-  try {
-    const res = await fetch("api/orders", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        customer_name: name.value, phone: phone.value, address: address.value,
-        items: cart.map(i => ({ id: i.id, qty: i.qty })),
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Couldn't place the order");
-    const o = data.order;
-
-    // clear cart & switch drawer to success state
-    cart = []; saveCart(); renderCart();
-    $("#cartItems").style.display = "none"; $("#shipMeter").style.display = "none";
-    $("#cartEmpty").style.display = "none"; $("#cartFoot").hidden = true;
-    checkoutForm.hidden = true;
-    $("#osOrderId").textContent = "#" + o.id;
-    $("#osTotal").textContent = fmtINR(o.total);
-    $("#osTrack").href = ME ? "dashboard.html" : "login.html?next=dashboard.html";
-    $("#osTrack").textContent = ME ? "Track my orders →" : "Sign in to track orders →";
-    orderSuccess.hidden = false;
-    // refresh live products (stock changed)
-    loadProducts();
-
-    // open WhatsApp with the order reference
-    const lines = o.items.map(i => `• ${i.qty} × ${i.name} — ${fmtINR(i.price * i.qty)}`);
-    const msg = [
-      `Hi ${SITE.brand}! I just placed order #${o.id} on your website:`,
-      ...lines,
-      ``,
-      `Subtotal: ${fmtINR(o.subtotal)}`,
-      `Delivery: ${o.delivery === 0 ? "FREE" : fmtINR(o.delivery)}`,
-      `Total: ${fmtINR(o.total)}`,
-      `Name: ${name.value.trim()} · Phone: ${phone.value.trim()}${address.value.trim() ? "\nAddress: " + address.value.trim() : ""}`,
-      ``,
-      `Please confirm stock & share payment / delivery details.`,
-    ].join("\n");
-    window.open(waLink(msg), "_blank", "noopener");
-    showToast(`<b>Order #${o.id}</b> placed — confirm on WhatsApp`);
-  } catch (err) {
-    showToast(err.message || "Order failed — try again");
-  } finally {
-    btn.disabled = false; btn.textContent = "Confirm & Place Order";
-  }
-});
-$("#osContinue").addEventListener("click", () => {
-  orderSuccess.hidden = true;
-  $("#cartItems").style.display = ""; $("#shipMeter").style.display = ""; $("#cartEmpty").style.display = ""; $("#cartFoot").hidden = cartItems().length === 0;
-  closeCart();
+  location.href = "checkout.html";
 });
 
 /* ═════════ Booking form → saved as lead + WhatsApp ═════════ */

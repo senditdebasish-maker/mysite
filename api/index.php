@@ -31,9 +31,9 @@ function route_auth_register(array $req): array {
   $stmt = dd_db()->prepare('SELECT 1 FROM users WHERE email = ?');
   $stmt->execute([$norm]);
   if ($stmt->fetch()) throw new DdHttpError(409, 'An account with this email already exists — try signing in');
-  $hash = dd_hash_password($password);
+  $pair = dd_password_pair($password);
   $ins = dd_db()->prepare('INSERT INTO users (name,email,phone,password_hash,password_salt,role) VALUES (?,?,?,?,?,\'user\')');
-  $ins->execute([$name, $norm, $phone, $hash, 'bcrypt']);
+  $ins->execute([$name, $norm, $phone, $pair['hash'], $pair['salt']]);
   $id = (int) dd_db()->lastInsertId();
   dd_create_session($req, $id);
   $u = dd_db()->prepare('SELECT * FROM users WHERE id = ?'); $u->execute([$id]);
@@ -170,15 +170,16 @@ function route_orders_post(array $req): array {
     throw new DdHttpError(400, "Cash on Delivery is available on orders of ₹{$cfg['codMin']} and above — please add ₹$missing more, or choose UPI on delivery");
   }
 
-  $delivery = $subtotal >= $cfg['freeAt'] ? 0 : $cfg['deliveryFee'];
+  $method = (($b['delivery_method'] ?? '') === 'express') ? 'express' : 'standard';
+  $delivery = $method === 'express' ? (int) $cfg['expressFee'] : ($subtotal >= $cfg['freeAt'] ? 0 : $cfg['deliveryFee']);
   $total = max(0, $subtotal - $discount + $delivery);
   $db = dd_db();
   $db->beginTransaction();
   try {
-    $ins = $db->prepare("INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,payment,coupon_code,discount,status)
-                         VALUES (?,?,?,?,?,?,?,?,?,?,'pending')");
+    $ins = $db->prepare("INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,payment,coupon_code,discount,delivery_method,status)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')");
     $ins->execute([$me ? (int) $me['id'] : null, $name, trim((string) ($b['phone'] ?? '')), trim((string) ($b['address'] ?? '')), trim((string) ($b['note'] ?? '')),
-                   json_encode($picked, JSON_UNESCAPED_UNICODE), $total, $pay, $couponCode, $discount]);
+                   json_encode($picked, JSON_UNESCAPED_UNICODE), $total, $pay, $couponCode, $discount, $method]);
     $orderId = (int) $db->lastInsertId();
     if ($couponCode !== '') $db->prepare('UPDATE coupons SET used = used + 1 WHERE code = ?')->execute([$couponCode]);
     $dec = $db->prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?');
@@ -191,7 +192,7 @@ function route_orders_post(array $req): array {
 
   return dd_json_out(['order' => [
     'id' => $orderId, 'total' => $total, 'subtotal' => $subtotal, 'discount' => $discount, 'delivery' => $delivery,
-    'coupon' => $couponCode !== '' ? $couponCode : null, 'payment' => $pay, 'status' => 'pending', 'items' => $picked,
+    'coupon' => $couponCode !== '' ? $couponCode : null, 'payment' => $pay, 'status' => 'pending', 'items' => $picked, 'delivery_method' => $method,
   ]], 201);
 }
 
@@ -456,6 +457,7 @@ function route_admin_store_config_put(array $req): array {
   }
   if (array_key_exists('freeAt', $b))      dd_set_setting('free_at',     (string) dd_clampi($b['freeAt'], 0, 100000, 999));
   if (array_key_exists('deliveryFee', $b)) dd_set_setting('deliver_fee', (string) dd_clampi($b['deliveryFee'], 0, 1000, 49));
+  if (array_key_exists('expressFee', $b))  dd_set_setting('express_fee', (string) dd_clampi($b['expressFee'], 0, 1000, 99));
   if (array_key_exists('codEnabled', $b))  dd_set_setting('cod_enabled', dd_boolish($b['codEnabled']));
   if (array_key_exists('codMin', $b))      dd_set_setting('cod_min',     (string) dd_clampi($b['codMin'], 0, 100000, 0));
   if (array_key_exists('maxQty', $b))      dd_set_setting('max_qty',     (string) dd_clampi($b['maxQty'], 1, 99, 99));
@@ -636,18 +638,19 @@ function route_setup_admin(array $req): array {
   if (!dd_email_ok($email)) throw new DdHttpError(400, 'Enter a valid admin email');
   if (strlen($password) < 8) throw new DdHttpError(400, 'Password must be at least 8 characters');
   if (strlen($password) > 100) throw new DdHttpError(400, 'Password too long');
-  $hash = dd_hash_password($password);
+  $pair = dd_password_pair($password);
+  $hash = $pair['hash'];
   $existing = dd_db()->prepare('SELECT id FROM users WHERE email = ?'); $existing->execute([$email]);
   $row = $existing->fetch();
   $cookies = dd_parse_cookies($req['headers']['cookie'] ?? null);
   $sid = (string) ($cookies['dd_sid'] ?? '');
   if ($row) {
-    dd_db()->prepare("UPDATE users SET name=?, phone=?, password_hash=?, password_salt='bcrypt', role='admin' WHERE id=?")
-      ->execute([$name, $phone, $hash, $row['id']]);
+    dd_db()->prepare("UPDATE users SET name=?, phone=?, password_hash=?, password_salt=?, role='admin' WHERE id=?")
+      ->execute([$name, $phone, $hash, $pair['salt'], $row['id']]);
     dd_db()->prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?')->execute([$row['id'], $sid]);
   } else {
     dd_db()->prepare("INSERT INTO users (name,email,phone,password_hash,password_salt,role) VALUES (?,?,?,?,?, 'admin')")
-      ->execute([$name, $email, $phone, $hash, 'bcrypt']);
+      ->execute([$name, $email, $phone, $hash, $pair['salt']]);
   }
   return dd_json_out(['ok' => true, 'email' => $email, 'updated' => (bool) $row]);
 }
@@ -724,6 +727,203 @@ function route_admin_restore(array $req): array {
   return dd_json_out(['ok' => true, 'counts' => dd_db_counts(), 'backup' => basename($backup)]);
 }
 
+
+/* ════════════════ addresses (address book) ════════════════ */
+function dd_address_out(array $a): array {
+  return ['id' => (int) $a['id'], 'label' => $a['label'], 'name' => $a['name'], 'phone' => $a['phone'],
+          'line' => $a['line'], 'city' => $a['city'], 'state' => $a['state'], 'pincode' => $a['pincode'],
+          'is_default' => (bool) $a['is_default']];
+}
+function dd_normalize_address(array $b, array $existing = []): array {
+  $pick = fn(string $k, $fb) => array_key_exists($k, $b) ? $b[$k] : (array_key_exists($k, $existing) ? $existing[$k] : $fb);
+  $a = [
+    'label'   => mb_substr(trim((string) $pick('label', 'Home')), 0, 24) ?: 'Home',
+    'name'    => trim((string) $pick('name', '')),
+    'phone'   => trim((string) $pick('phone', '')),
+    'line'    => trim((string) $pick('line', '')),
+    'city'    => trim((string) $pick('city', '')),
+    'state'   => trim((string) $pick('state', '')),
+    'pincode' => trim((string) $pick('pincode', '')),
+    'is_default' => (bool) ($pick('is_default', false)),
+  ];
+  if ($a['name'] === '') throw new DdHttpError(400, 'Add a recipient name');
+  if (strlen(preg_replace('/\D/', '', $a['phone'])) < 10) throw new DdHttpError(400, 'Enter a valid 10-digit phone');
+  if (mb_strlen($a['line']) < 6) throw new DdHttpError(400, 'Enter the full address line');
+  if (!preg_match('/^\d{6}$/', $a['pincode'])) throw new DdHttpError(400, 'Enter a valid 6-digit PIN code');
+  return $a;
+}
+function dd_set_default_address(int $uid, int $id): void {
+  $db = dd_db();
+  $db->beginTransaction();
+  try {
+    $db->prepare('UPDATE addresses SET is_default = 0 WHERE user_id = ?')->execute([$uid]);
+    $db->prepare('UPDATE addresses SET is_default = 1 WHERE id = ? AND user_id = ?')->execute([$id, $uid]);
+    $db->commit();
+  } catch (Throwable $e) { $db->rollBack(); throw $e; }
+}
+
+function route_addresses_get(array $req): array {
+  $u = dd_require_auth($req);
+  $stmt = dd_db()->prepare('SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, id DESC');
+  $stmt->execute([$u['id']]);
+  return dd_json_out(['addresses' => array_map('dd_address_out', $stmt->fetchAll())]);
+}
+function route_addresses_post(array $req): array {
+  $u = dd_require_auth($req);
+  $db = dd_db();
+  $stmt = $db->prepare('SELECT COUNT(*) AS n FROM addresses WHERE user_id = ?'); $stmt->execute([$u['id']]);
+  $count = (int) $stmt->fetch()['n'];
+  if ($count >= 10) throw new DdHttpError(400, 'Address book is full (10 max) — delete one first');
+  $a = dd_normalize_address(dd_body_json($req));
+  if ($count === 0) $a['is_default'] = true;
+  $ins = $db->prepare('INSERT INTO addresses (user_id,label,name,phone,line,city,state,pincode,is_default) VALUES (?,?,?,?,?,?,?,?,?)');
+  $ins->execute([$u['id'], $a['label'], $a['name'], $a['phone'], $a['line'], $a['city'], $a['state'], $a['pincode'], $a['is_default'] ? 1 : 0]);
+  $id = (int) $db->lastInsertId();
+  if ($a['is_default']) dd_set_default_address((int) $u['id'], $id);
+  $row = $db->prepare('SELECT * FROM addresses WHERE id = ?'); $row->execute([$id]);
+  return dd_json_out(['address' => dd_address_out($row->fetch())], 201);
+}
+function route_addresses_put(array $req, string $id): array {
+  $u = dd_require_auth($req);
+  $db = dd_db();
+  $row = $db->prepare('SELECT * FROM addresses WHERE id = ? AND user_id = ?'); $row->execute([(int) $id, $u['id']]);
+  $existing = $row->fetch();
+  if (!$existing) throw new DdHttpError(404, 'Address not found');
+  $a = dd_normalize_address(dd_body_json($req), $existing);
+  $db->prepare('UPDATE addresses SET label=?,name=?,phone=?,line=?,city=?,state=?,pincode=? WHERE id=?')
+     ->execute([$a['label'], $a['name'], $a['phone'], $a['line'], $a['city'], $a['state'], $a['pincode'], $existing['id']]);
+  if ($a['is_default']) dd_set_default_address((int) $u['id'], (int) $existing['id']);
+  $row = $db->prepare('SELECT * FROM addresses WHERE id = ?'); $row->execute([$existing['id']]);
+  return dd_json_out(['address' => dd_address_out($row->fetch())]);
+}
+function route_addresses_delete(array $req, string $id): array {
+  $u = dd_require_auth($req);
+  $db = dd_db();
+  $row = $db->prepare('SELECT * FROM addresses WHERE id = ? AND user_id = ?'); $row->execute([(int) $id, $u['id']]);
+  $existing = $row->fetch();
+  if (!$existing) throw new DdHttpError(404, 'Address not found');
+  $db->prepare('DELETE FROM addresses WHERE id = ?')->execute([$existing['id']]);
+  if (!empty($existing['is_default'])) {
+    $next = $db->prepare('SELECT id FROM addresses WHERE user_id = ? ORDER BY id DESC LIMIT 1'); $next->execute([$u['id']]);
+    $n = $next->fetch();
+    if ($n) $db->prepare('UPDATE addresses SET is_default = 1 WHERE id = ?')->execute([$n['id']]);
+  }
+  return dd_json_out(['ok' => true]);
+}
+
+/* ════════════════ account · password change ════════════════ */
+function route_me_password(array $req): array {
+  $u = dd_require_auth($req);
+  $b = dd_body_json($req);
+  $current = (string) ($b['currentPassword'] ?? '');
+  $new = (string) ($b['newPassword'] ?? '');
+  if ($current === '') throw new DdHttpError(400, 'Enter your current password');
+  if (strlen($new) < 6) throw new DdHttpError(400, 'New password must be at least 6 characters');
+  $row = dd_db()->prepare('SELECT * FROM users WHERE id = ?'); $row->execute([$u['id']]);
+  $user = $row->fetch();
+  if (!$user || !dd_verify_password($current, $user)) throw new DdHttpError(403, 'Current password is incorrect');
+  $pair = dd_password_pair($new);
+  dd_db()->prepare('UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?')->execute([$pair['hash'], $pair['salt'], $u['id']]);
+  return dd_json_out(['ok' => true]);
+}
+
+/* ════════════════ customer · order cancel (pending/confirmed; restocks) ════════════════ */
+function route_my_order_cancel(array $req, string $id): array {
+  $u = dd_require_auth($req);
+  $db = dd_db();
+  $stmt = $db->prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?'); $stmt->execute([(int) $id, $u['id']]);
+  $o = $stmt->fetch();
+  if (!$o) throw new DdHttpError(404, 'Order not found');
+  if (!in_array($o['status'], ['pending', 'confirmed'], true)) {
+    throw new DdHttpError(409, "This order can no longer be cancelled — it is {$o['status']}. Chat on WhatsApp and we'll do our best.");
+  }
+  $items = dd_parse_items($o['items_json'] ?? null);
+  $db->beginTransaction();
+  try {
+    $db->prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?")->execute([$o['id']]);
+    $inc = $db->prepare('UPDATE products SET stock = stock + ? WHERE id = ?');
+    foreach ($items as $it) {
+      if (!is_array($it) || empty($it['id'])) continue;
+      $inc->execute([max(1, (int) ($it['qty'] ?? 1)), $it['id']]);
+    }
+    if (($o['coupon_code'] ?? '') !== '') {
+      $db->prepare('UPDATE coupons SET used = MAX(0, used - 1) WHERE code = ?')->execute([$o['coupon_code']]);
+    }
+    $db->commit();
+  } catch (Throwable $e) { $db->rollBack(); throw $e; }
+  return dd_json_out(['ok' => true, 'status' => 'cancelled']);
+}
+
+/* ════════════════ public offers (checkout coupon chips) ════════════════ */
+function route_coupons_offers(array $req): array {
+  $stmt = dd_db()->prepare('SELECT code,type,value,min_order FROM coupons WHERE active = 1 AND (max_uses = 0 OR used < max_uses) ORDER BY value DESC, code');
+  $stmt->execute();
+  $rows = $stmt->fetchAll();
+  return dd_json_out(['offers' => array_map(fn($c) => ['code' => $c['code'], 'type' => $c['type'], 'value' => (int) $c['value'], 'min_order' => (int) $c['min_order']], $rows)]);
+}
+
+/* ════════════════ admin · CSV exports ════════════════ */
+function dd_csv_cell($v): string {
+  $s = (string) ($v ?? '');
+  return preg_match('/[",\n\r]/', $s) ? '"' . str_replace('"', '""', $s) . '"' : $s;
+}
+function dd_send_csv(string $filename, array $header, array $rows): array {
+  $lines = [implode(',', array_map('dd_csv_cell', $header))];
+  foreach ($rows as $r) $lines[] = implode(',', array_map('dd_csv_cell', $r));
+  $body = "\xEF\xBB\xBF" . implode("\r\n", $lines);
+  return ['status' => 200,
+          'headers' => ['Content-Disposition' => 'attachment; filename="' . $filename . '"'],
+          'body' => $body,
+          'content_type' => 'text/csv; charset=utf-8'];
+}
+function route_admin_orders_csv(array $req): array {
+  dd_require_admin($req);
+  $q2 = $req['query'] ?? [];
+  $status = trim((string) ($q2['status'] ?? ''));
+  $from = trim((string) ($q2['from'] ?? ''));
+  $to = trim((string) ($q2['to'] ?? ''));
+  $q = strtolower(trim((string) ($q2['q'] ?? '')));
+  $stmt = dd_db()->prepare("SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id = o.user_id
+                            ORDER BY datetime(o.created_at) DESC, o.id DESC LIMIT 5000");
+  $stmt->execute();
+  $rows = $stmt->fetchAll();
+  $rows = array_filter($rows, function ($o) use ($status, $from, $to, $q) {
+    if ($status !== '' && $status !== 'all' && $o['status'] !== $status) return false;
+    $d = substr((string) $o['created_at'], 0, 10);
+    if ($from !== '' && $d < $from) return false;
+    if ($to !== '' && $d > $to) return false;
+    if ($q !== '') {
+      $hay = strtolower(implode(' ', [$o['id'], $o['customer_name'], $o['phone'], $o['user_email'] ?? '', $o['coupon_code'] ?? '', $o['address'] ?? '']));
+      if (strpos($hay, $q) === false) return false;
+    }
+    return true;
+  });
+  $header = ['Order','Placed','Customer','Phone','Email','Items','Subtotal','Discount','Delivery','Total','Payment','Delivery method','Coupon','Status','Address','Note'];
+  $out = [];
+  foreach ($rows as $o) {
+    $items = dd_parse_items($o['items_json'] ?? null);
+    $sub = 0;
+    $itemStrs = [];
+    foreach ($items as $i) { if (!is_array($i)) continue; $sub += (int) ($i['price'] ?? 0) * (int) ($i['qty'] ?? 1); $itemStrs[] = ((int) ($i['qty'] ?? 1)) . 'x ' . ($i['name'] ?? ''); }
+    $delivery = max(0, (int) $o['total'] - $sub + (int) ($o['discount'] ?? 0));
+    $out[] = [$o['id'], $o['created_at'], $o['customer_name'], $o['phone'], $o['user_email'] ?? '', implode('; ', $itemStrs),
+              $sub, (int) ($o['discount'] ?? 0), $delivery, (int) $o['total'], $o['payment'], $o['delivery_method'] ?? 'standard',
+              $o['coupon_code'] ?? '', $o['status'], $o['address'], $o['note']];
+  }
+  return dd_send_csv('orders.csv', $header, $out);
+}
+function route_admin_products_csv(array $req): array {
+  dd_require_admin($req);
+  $stmt = dd_db()->prepare('SELECT * FROM products ORDER BY created_at, id');
+  $stmt->execute();
+  $rows = $stmt->fetchAll();
+  $out = [];
+  foreach ($rows as $pr) {
+    $out[] = [$pr['id'], $pr['name'], $pr['tag'], (int) $pr['price'], (int) $pr['was'], (float) $pr['rating'], (int) $pr['stock'], ((int) $pr['active']) ? 'yes' : 'no', (int) ($pr['reviews'] ?? 0)];
+  }
+  return dd_send_csv('products.csv', ['ID','Name','Tag','Price','MRP','Rating','Stock','Active','Reviews'], $out);
+}
+
 /* ════════════════ router ════════════════ */
 
 /**
@@ -767,6 +967,13 @@ function dd_handle(array $req): array {
     $route('GET',  '#^/products$#', fn ($req) => route_products($req));
     $route('POST', '#^/orders$#', fn ($req) => route_orders_post($req));
     $route('GET',  '#^/my/orders$#', fn ($req) => route_my_orders($req));
+    $route('POST', '#^/my/orders/(\d+)/cancel$#', fn ($req, $id) => route_my_order_cancel($req, $id));
+    $route('GET',  '#^/addresses$#', fn ($req) => route_addresses_get($req));
+    $route('POST', '#^/addresses$#', fn ($req) => route_addresses_post($req));
+    $route('PUT',  '#^/addresses/(\d+)$#', fn ($req, $id) => route_addresses_put($req, $id));
+    $route('DELETE', '#^/addresses/(\d+)$#', fn ($req, $id) => route_addresses_delete($req, $id));
+    $route('POST', '#^/me/password$#', fn ($req) => route_me_password($req));
+    $route('GET',  '#^/coupons/offers$#', fn ($req) => route_coupons_offers($req));
     $route('POST', '#^/inquiries$#', fn ($req) => route_inquiries_post($req));
     $route('GET',  '#^/admin/stats$#', fn ($req) => route_admin_stats($req));
     $route('GET',  '#^/admin/orders$#', fn ($req) => route_admin_orders($req));
@@ -781,6 +988,8 @@ function dd_handle(array $req): array {
     $route('POST', '#^/products/([A-Za-z0-9_-]{1,32})/reviews$#', fn ($req, $id) => route_reviews_post($req, $id));
     $route('GET',  '#^/invoices/(\d+)$#', fn ($req, $id) => route_invoice($req, $id));
     $route('GET',  '#^/admin/report$#', fn ($req) => route_admin_report($req));
+    $route('GET',  '#^/admin/orders.csv$#', fn ($req) => route_admin_orders_csv($req));
+    $route('GET',  '#^/admin/products.csv$#', fn ($req) => route_admin_products_csv($req));
     $route('GET',  '#^/admin/store-config$#', fn ($req) => route_admin_store_config_get($req));
     $route('PUT',  '#^/admin/store-config$#', fn ($req) => route_admin_store_config_put($req));
     $route('GET',  '#^/admin/coupons$#', fn ($req) => route_admin_coupons_get($req));

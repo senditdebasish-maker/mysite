@@ -124,14 +124,34 @@
         <button class="chip" data-filter="delivered">Delivered</button>
         <button class="chip" data-filter="cancelled">Cancelled</button>
       </div>
+      <div class="orders-toolbar">
+        <input type="search" id="orderSearch" class="orders-search" placeholder="Search name, phone, order #, coupon…" aria-label="Search orders" />
+        <label class="orders-date">From <input type="date" id="orderFrom" /></label>
+        <label class="orders-date">To <input type="date" id="orderTo" /></label>
+        <a class="mini-btn" id="ordersCsvLink" href="api/admin/orders.csv" download>⬇ Export CSV</a>
+        <button class="mini-btn" id="ordersCsvClear" type="button" hidden>Clear dates ✕</button>
+      </div>
+      <div class="bulk-bar" id="bulkBar" hidden>
+        <label class="bulk-check"><input type="checkbox" id="bulkSelectAll" /> Select all shown</label>
+        <span class="bulk-count"><strong id="bulkCount">0</strong> selected</span>
+        <label class="bulk-label">Mark as
+          <select id="bulkStatus" class="status-select">
+            <option value="confirmed">Confirmed</option>
+            <option value="shipped">Shipped</option>
+            <option value="delivered">Delivered</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </label>
+        <button class="btn btn-ink btn-sm" id="bulkApply" type="button">Apply</button>
+      </div>
       <div class="panel">
         <div class="tbl-wrap">
           <table class="tbl">
-            <thead><tr><th>#</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Placed</th><th></th></tr></thead>
+            <thead><tr><th class="bulk-th"><input type="checkbox" id="headSelectAll" aria-label="Select all orders" /></th><th>#</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Placed</th><th></th></tr></thead>
             <tbody id="ordersBody"></tbody>
           </table>
         </div>
-        <p class="muted" id="ordersEmptyNote" hidden style="padding:.8rem .2rem">No orders with this status yet.</p>
+        <p class="muted" id="ordersEmptyNote" hidden style="padding:.8rem .2rem">No orders match those filters.</p>
       </div>
     </section>
 
@@ -139,7 +159,16 @@
     <section class="pane" id="pane-products" data-hidden="true">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:.6rem; margin-bottom:.6rem; flex-wrap:wrap">
         <p class="muted" style="margin:0; font-size:.8rem">Stock changes here update the live store instantly. Sold-out items show as “Sold out” and can’t be added to cart.</p>
-        <button class="btn btn-ink btn-sm" id="addProductBtn" type="button">+ Add product</button>
+        <span style="display:flex; gap:.4rem; align-items:center">
+          <a class="mini-btn" href="api/admin/products.csv" download>⬇ Export CSV</a>
+          <button class="btn btn-ink btn-sm" id="addProductBtn" type="button">+ Add product</button>
+        </span>
+      </div>
+      <div class="chip-row" id="productFilterChips" aria-label="Filter products by stock" style="margin-bottom:.6rem">
+        <button class="chip is-active" data-pfilter="all">All</button>
+        <button class="chip" data-pfilter="low">Low stock · ≤5</button>
+        <button class="chip" data-pfilter="out">Sold out</button>
+        <button class="chip" data-pfilter="hidden">Hidden</button>
       </div>
       <div id="productsList" aria-live="polite"></div>
     </section>
@@ -173,6 +202,7 @@
             <div class="sf-row">
               <label class="field">Free delivery above ₹<input id="sfFreeAtInput" type="number" min="0" step="1" /></label>
               <label class="field">Delivery fee ₹<input id="sfFeeInput" type="number" min="0" step="1" /></label>
+              <label class="field">Express fee ₹<input id="sfExpressFeeInput" type="number" min="0" max="1000" step="1" title="Flat fee for 1–2 day delivery, any order value" /></label>
               <label class="field">Max qty / line<input id="sfMaxQty" type="number" min="1" max="99" step="1" /></label>
             </div>
             <div class="sf-row">

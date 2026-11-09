@@ -120,16 +120,22 @@ No Node, no proxy, your other PHP/MySQL apps untouched.
 | `/invoice.html` | **GST tax invoice** — printable A4 invoice per order (owner or admin only); amount in words, 18% GST-inclusive split, seller GSTIN block, “computer-generated” terms |
 | `/setup.html`   | **First-run setup wizard** (locks to admins after completion) — database location & connection test, demo/empty install, brand & seller identity (GSTIN, WhatsApp, email), admin account, storefront rules, backup/restore |
 | `/contact.html`  | **Book a free call** — WhatsApp/call/email channels + brief form (saves to admin Leads) |
+| `/checkout.html` | **Checkout** — contact prefill, address book picker or new address (PIN-validated, 6-digit), Standard vs Express delivery, COD/UPI on delivery, coupon chips from live offers, GST-inclusive totals |
+| `/order-success.html` | **Order confirmation** — order number, delivery ETA, payment & address recap, WhatsApp hand-off fallback when the backend is unreachable |
+| `/policies.html` | **Shipping · Returns · Cancellation · Privacy · Terms** — plain-English, PAN-India, honest rates |
 | `/login.html`   | Split-screen sign in / create account (tabs, demo-creds autofill) |
-| `/dashboard.html` | **Customer dashboard** — My Orders with live status stepper, reorder, profile edit |
-| `/admin.html`   | **Admin dashboard** — Overview stats, Orders, Products, Customers, Leads inbox, **Storefront** (announcement, delivery rules, COD gate, LIVE/closed toggle, featured picks, coupon manager, inventory quick adjust), **Reports** (avg order value, units moved 30 d, coupon performance, COD-vs-UPI mix, 14-day revenue chart, top-selling products) |
+| `/dashboard.html` | **Customer dashboard** — tabbed: **Orders** (status stepper, reorder, GST invoice download, one-tap cancel for pending/confirmed orders) · **Addresses** (full address book: add/edit/delete/make-default) · **Wishlist** · **Profile & Security** (name/phone + password change) |
+| `/admin.html`   | **Admin dashboard** — Overview stats, Orders (search, from/to date filter, bulk status updates, CSV export), Products (low-stock/sold-out/hidden filter chips, CSV export), Customers, Leads inbox, **Storefront** (announcement, delivery rules incl. express fee, COD gate, LIVE/closed toggle, featured picks, coupon manager, inventory quick adjust), **Reports** (avg order value, units moved 30 d, coupon performance, COD-vs-UPI mix, 14-day revenue chart, top-selling products) |
 
 The nav tabs on every page link to these dedicated pages; the home page keeps the snap-scroll single-page experience.
 
 ### Features
 
-- **Real auth** — salted-hash passwords (Node `scrypt`; PHP bcrypt with transparent legacy-scrypt upgrade on first login), HttpOnly session cookies (30-day), login throttling (8 tries / 5 min), role-based access (`user` / `admin`)
-- **Working cart → checkout → order** — server computes totals, delivery fee, stock checks & decrements; free delivery over ₹999 (else ₹49)
+- **Real auth** — salted-hash passwords in the **same Node-compatible scrypt format on both editions** (PHP additionally *tolerates* legacy bcrypt rows; no bcrypt hashes are written anymore), HttpOnly session cookies (30-day), login throttling (8 tries / 5 min), role-based access (`user` / `admin`)
+- **Working cart → checkout → order** — server computes totals, delivery fee, stock checks & decrements; free delivery over ₹999 (else ₹49); **Express delivery (1–2 days, ₹99)** option at checkout
+- **Full checkout flow** — dedicated `/checkout.html` (guest or signed-in), address book with PIN validation, coupon chips, COD minimum + stock guards enforced server-side, **WhatsApp hand-off fallback** when the backend is unreachable
+- **Customer self-service** — order cancellation while pending/confirmed (atomic restock + coupon-usage rollback), saved address book (max 10, default-address promotion), password change with current-password check
+- **Order confirmation & policies** — `/order-success.html` recap page, `/policies.html` (shipping/returns/cancellation/privacy/terms)
 - **Enterprise storefront** — 14-product catalog with reviews, instant search, price buckets, category counts, in-stock filter, popularity/discount/price/rating sort, Today’s Deals rail with live countdown, quick view (qty stepper, share), localStorage wishlist, delivery ETA per card
 - **Reviews & ratings** — seeded reviews per product, average + distribution bars, signed-in customers can write one review per product (server-enforced), verified buyer badges on order-derived stats
 - **Printed invoices** — every order gets an A4 GST tax invoice (browser print / Save as PDF), owner- or admin-only, with seller GSTIN and amount-in-words
@@ -138,7 +144,8 @@ The nav tabs on every page link to these dedicated pages; the home page keeps th
 - **COD & UPI on delivery** — selectable at checkout; server gates COD (enable/disable + minimum order) via Admin → Storefront
 - **Admin → Storefront page** — inventory value & units, out/low-stock badges, announcement bar editor, free-delivery threshold / fee / max-qty / COD rules, LIVE ⇄ restocking toggle (checkout closes), featured-picks grid, coupon CRUD with active toggles, inline stock adjust with +10 restock |
 - **Live order tracking** — admin advances `pending → confirmed → shipped → delivered`; the customer dashboard shows it instantly (auto-refreshes every 20 s)
-- **Admin product manager** — restock/reprice/add/retire products; changes appear on the live store immediately; sold-out items disable the Add button
+- **Admin product manager** — restock/reprice/add/retire products; changes appear on the live store immediately; sold-out items disable the Add button; low-stock/sold-out/hidden filter chips; **CSV export**
+- **Admin order operations** — full-text search (name/phone/order #/coupon/email), from/to date filters, bulk status updates, **orders CSV export** (Excel-friendly BOM)
 - **Leads inbox** — every “Book a free call” submission is stored and listed in Admin → Leads with a one-tap WhatsApp reply
 - **Guest checkout** — works without an account; order confirmation opens WhatsApp with the order ref
 - Light Studio/Editorial theme, scroll-snap sections, horizontal carousels, reduced-motion support
@@ -152,7 +159,11 @@ GET  /product/<id>                       (HTML; OG/canonical/JSON-LD injected pe
 GET  /api/products/<id>/reviews          (public)   POST …/reviews     (signed-in; one per user per product)
 GET  /api/invoices/<orderId>             (owner or admin — printable GST invoice data)
 POST /api/coupons/validate               (public: code + basket subtotal → discount)
-POST /api/orders                         GET /api/my/orders
+POST /api/orders  {delivery_method:"standard|express"}   GET /api/my/orders
+POST /api/my/orders/:id/cancel          (own pending|confirmed; restocks atomically)
+GET/POST/PUT/DELETE /api/addresses[/:id]   (signed-in; max 10; PIN-validated; default-address promotion)
+POST /api/me/password                    (current-password check → scrypt pair)
+GET  /api/coupons/offers                 (public; active & in-stock coupons for checkout chips)
 GET  /sitemap.xml   GET /robots.txt
 GET  /api/setup/status               (public: install state; full details for admins / pre-setup)
 POST /api/setup/test-db|database|site|admin|store|complete   (open until setup completes, then admin-only)
@@ -161,7 +172,9 @@ POST /api/inquiries                      (public, from the contact form)
 GET  /api/admin/stats      GET/PUT  /api/admin/orders[/:id/status]
 GET/POST/PUT/DELETE /api/admin/products[/:id]   (DELETE = soft, keeps order history)
 GET  /api/admin/customers  GET /api/admin/inquiries
-GET/PUT /api/admin/store-config           (announcement, free-delivery, COD rules, live toggle, featured ids)
+GET/PUT /api/admin/store-config           (announcement, free-delivery, DELIVERY + EXPRESS fees, COD rules, live toggle, featured ids)
+GET  /api/admin/orders.csv?status&from&to&q      (Excel-friendly, ≤5000 rows, admin-only)
+GET  /api/admin/products.csv
 GET/POST/PUT/DELETE /api/admin/coupons[/:code]   (PUT toggles active)
 GET  /api/admin/report                    (14-day revenue, top products, payment mix, coupon usage, AOV)
 GET  /api/admin/backup                   (consistent .db snapshot, admin-only)   POST /api/admin/restore (upload .db, rolls back on failure)
@@ -173,8 +186,9 @@ Errors return `{ error: "message" }` with a proper HTTP status. The server never
 ## Structure
 
 ```
-index.html                 home (snap sections, cart drawer, checkout + success states)
+index.html                 home (snap sections, cart drawer → checkout.html)
 services.html / hosting.html / store.html / contact.html   ← tab pages
+checkout.html / order-success.html / policies.html         ← checkout flow + store policies
 login.html / dashboard.html / admin.html
 server/server.js           Node edition — Express + node:sqlite backend (API + static hosting + seed)
 .htaccess                  PHP edition — Apache routing (/api → api/index.php, pages, assets; blocks data/)
@@ -184,6 +198,7 @@ serve.php                  PHP edition — `php -S` local router (mirrors .htacc
 assets/css/styles.css      home page theme      assets/css/app.css   login/dashboard/admin theme
 assets/css/pages.css       shared chrome for the 4 tab pages (nav, footer, heroes, cards, FAQ)
 assets/js/app.js           home page logic      assets/js/ui.js      shared helpers (toast/fetch/fmt)
+assets/js/checkout.js     checkout page          assets/css/checkout.css   checkout styles
 assets/js/subpages.js      tab pages: mobile menu, live cart badge, auth-aware nav
 assets/js/store-core.js    shared DD engine (cart, coupons, checkout, toast, store config, products cache)
 assets/js/store.js         storefront layer (facets, deals rail, quick view, wishlist) — cards link to /product/<id>

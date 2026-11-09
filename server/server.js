@@ -80,9 +80,23 @@ CREATE TABLE IF NOT EXISTS orders (
   payment       TEXT NOT NULL DEFAULT 'cod',
   coupon_code   TEXT NOT NULL DEFAULT '',
   discount      INTEGER NOT NULL DEFAULT 0,
+  delivery_method TEXT NOT NULL DEFAULT 'standard',
   status        TEXT NOT NULL DEFAULT 'pending'
                 CHECK(status IN ('pending','confirmed','shipped','delivered','cancelled')),
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS addresses (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  label      TEXT NOT NULL DEFAULT 'Home',
+  name       TEXT NOT NULL,
+  phone      TEXT NOT NULL,
+  line       TEXT NOT NULL,
+  city       TEXT NOT NULL DEFAULT '',
+  state      TEXT NOT NULL DEFAULT '',
+  pincode    TEXT NOT NULL DEFAULT '',
+  is_default INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS inquiries (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,6 +137,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_user     ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status   ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created  ON orders(created_at);
 CREATE INDEX IF NOT EXISTS idx_reviews_product  ON reviews(product_id);
+CREATE INDEX IF NOT EXISTS idx_addresses_user   ON addresses(user_id);
 `);
 
 /* ── migrations for databases created before the storefront build ── */
@@ -132,6 +147,7 @@ const runMigrations = () => {
   if (!_cols("orders").includes("payment"))     db.exec("ALTER TABLE orders ADD COLUMN payment TEXT NOT NULL DEFAULT 'cod'");
   if (!_cols("orders").includes("coupon_code")) db.exec("ALTER TABLE orders ADD COLUMN coupon_code TEXT NOT NULL DEFAULT ''");
   if (!_cols("orders").includes("discount"))    db.exec("ALTER TABLE orders ADD COLUMN discount INTEGER NOT NULL DEFAULT 0");
+  if (!_cols("orders").includes("delivery_method")) db.exec("ALTER TABLE orders ADD COLUMN delivery_method TEXT NOT NULL DEFAULT 'standard'");
 };
 const openDb = (p) => { const nd = new DatabaseSync(p); db = nd; ensureSchema(); runMigrations(); };
 openDb(currentDbPath);
@@ -148,6 +164,7 @@ const adminPw    = process.env.ADMIN_PASSWORD || "admin123";
     announce:      "Free delivery over ₹999 ✦ 7-day easy returns ✦ COD & UPI on delivery",
     free_at:       "999",
     deliver_fee:   "49",
+    express_fee:   "99",
     cod_enabled:   "1",
     cod_min:       "0",
     max_qty:       "99",
@@ -435,6 +452,7 @@ const storeConfig = () => {
     announce:    getSetting("announce"),
     freeAt:      numSetting("free_at", 999),
     deliveryFee: numSetting("deliver_fee", 49),
+    expressFee:  numSetting("express_fee", 99),
     codEnabled:  getSetting("cod_enabled") === "1",
     codMin:      numSetting("cod_min", 0),
     maxQty:      numSetting("max_qty", 99),
@@ -510,19 +528,20 @@ app.post("/api/orders", asyncWrap(async (req, res) => {
     return res.status(400).json({ error: `Cash on Delivery is available on orders of ₹${cfg.codMin} and above — please add ${(cfg.codMin - subtotal).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })} more, or choose UPI on delivery` });
   }
 
-  const delivery = subtotal >= cfg.freeAt ? 0 : cfg.deliveryFee;
+  const method = (req.body && req.body.delivery_method === "express") ? "express" : "standard";
+  const delivery = method === "express" ? cfg.expressFee : (subtotal >= cfg.freeAt ? 0 : cfg.deliveryFee);
   const total    = Math.max(0, subtotal - discount + delivery);
-  const info = db.prepare(`INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,payment,coupon_code,discount,status)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,'pending')`)
+  const info = db.prepare(`INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,payment,coupon_code,discount,delivery_method,status)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')`)
     .run(me ? me.id : null, name, String(phone || "").trim(), String(address || "").trim(), String(note || "").trim(),
-         JSON.stringify(picked), total, pay, couponCode, discount);
+         JSON.stringify(picked), total, pay, couponCode, discount, method);
   if (couponCode) db.prepare("UPDATE coupons SET used = used + 1 WHERE code = ?").run(couponCode);
   // decrement stock
   const dec = db.prepare("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?");
   for (const it of picked) dec.run(it.qty, it.id);
 
   res.status(201).json({ order: { id: Number(info.lastInsertRowid), total, subtotal, discount, delivery,
-    coupon: couponCode || null, payment: pay, status: "pending", items: picked } });
+    coupon: couponCode || null, payment: pay, status: "pending", items: picked, delivery_method: method } });
 }));
 
 app.get("/api/my/orders", requireAuth, (req, res) => {
@@ -538,6 +557,146 @@ app.post("/api/inquiries", asyncWrap(async (req, res) => {
     .run(String(name).trim(), String(phone || "").trim(), String(need || "").trim(), String(budget || "").trim(), String(message || "").trim());
   res.status(201).json({ ok: true });
 }));
+
+/* ════════════════ ADDRESSES (address book) ════════════════ */
+const normalizeAddress = (body, existing = {}) => {
+  const pick = (k, fb) => body[k] !== undefined ? body[k] : (existing[k] !== undefined ? existing[k] : fb);
+  const a = {
+    label:   String(pick("label", "Home")).trim().slice(0, 24) || "Home",
+    name:    String(pick("name", "")).trim(),
+    phone:   String(pick("phone", "")).trim(),
+    line:    String(pick("line", "")).trim(),
+    city:    String(pick("city", "")).trim(),
+    state:   String(pick("state", "")).trim(),
+    pincode: String(pick("pincode", "")).trim(),
+    is_default: !!pick("is_default", false),
+  };
+  if (!a.name)  throw Object.assign(new Error("Add a recipient name"), { status: 400 });
+  if (a.phone.replace(/\D/g, "").length < 10) throw Object.assign(new Error("Enter a valid 10-digit phone"), { status: 400 });
+  if (a.line.length < 6) throw Object.assign(new Error("Enter the full address line"), { status: 400 });
+  if (!/^\d{6}$/.test(a.pincode)) throw Object.assign(new Error("Enter a valid 6-digit PIN code"), { status: 400 });
+  return a;
+};
+const addressOut = (a) => ({ id: a.id, label: a.label, name: a.name, phone: a.phone, line: a.line,
+  city: a.city, state: a.state, pincode: a.pincode, is_default: !!a.is_default });
+const getAddresses = (uid) => db.prepare("SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, id DESC").all(uid);
+const setDefaultAddress = (uid, id) => {
+  db.exec("BEGIN");
+  try {
+    db.prepare("UPDATE addresses SET is_default = 0 WHERE user_id = ?").run(uid);
+    db.prepare("UPDATE addresses SET is_default = 1 WHERE id = ? AND user_id = ?").run(id, uid);
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
+};
+
+app.get("/api/addresses", requireAuth, (req, res) => {
+  res.json({ addresses: getAddresses(req.user.id).map(addressOut) });
+});
+app.post("/api/addresses", requireAuth, asyncWrap(async (req, res) => {
+  const count = db.prepare("SELECT COUNT(*) AS n FROM addresses WHERE user_id = ?").get(req.user.id).n;
+  if (count >= 10) return res.status(400).json({ error: "Address book is full (10 max) — delete one first" });
+  let a; try { a = normalizeAddress(req.body || {}); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  if (count === 0) a.is_default = true;
+  const info = db.prepare("INSERT INTO addresses (user_id,label,name,phone,line,city,state,pincode,is_default) VALUES (?,?,?,?,?,?,?,?,?)")
+    .run(req.user.id, a.label, a.name, a.phone, a.line, a.city, a.state, a.pincode, a.is_default ? 1 : 0);
+  const id = Number(info.lastInsertRowid);
+  if (a.is_default) setDefaultAddress(req.user.id, id);
+  res.status(201).json({ address: addressOut(db.prepare("SELECT * FROM addresses WHERE id = ?").get(id)) });
+}));
+app.put("/api/addresses/:id", requireAuth, asyncWrap(async (req, res) => {
+  const row = db.prepare("SELECT * FROM addresses WHERE id = ? AND user_id = ?").get(Number(req.params.id), req.user.id);
+  if (!row) return res.status(404).json({ error: "Address not found" });
+  let a; try { a = normalizeAddress(req.body || {}, row); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  db.prepare("UPDATE addresses SET label=?,name=?,phone=?,line=?,city=?,state=?,pincode=? WHERE id=?")
+    .run(a.label, a.name, a.phone, a.line, a.city, a.state, a.pincode, row.id);
+  if (a.is_default) setDefaultAddress(req.user.id, row.id);
+  res.json({ address: addressOut(db.prepare("SELECT * FROM addresses WHERE id = ?").get(row.id)) });
+}));
+app.delete("/api/addresses/:id", requireAuth, asyncWrap(async (req, res) => {
+  const row = db.prepare("SELECT * FROM addresses WHERE id = ? AND user_id = ?").get(Number(req.params.id), req.user.id);
+  if (!row) return res.status(404).json({ error: "Address not found" });
+  db.prepare("DELETE FROM addresses WHERE id = ?").run(row.id);
+  if (row.is_default) {
+    const next = db.prepare("SELECT id FROM addresses WHERE user_id = ? ORDER BY id DESC LIMIT 1").get(req.user.id);
+    if (next) db.prepare("UPDATE addresses SET is_default = 1 WHERE id = ?").run(next.id);
+  }
+  res.json({ ok: true });
+}));
+
+/* ════════════════ ACCOUNT · PASSWORD CHANGE ════════════════ */
+app.post("/api/me/password", requireAuth, asyncWrap(async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword) return res.status(400).json({ error: "Enter your current password" });
+  if (!newPassword || String(newPassword).length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
+  const u = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
+  if (!u || hashPw(String(currentPassword), u.password_salt) !== u.password_hash) {
+    return res.status(403).json({ error: "Current password is incorrect" });
+  }
+  const salt = crypto.randomBytes(16).toString("hex");
+  db.prepare("UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?").run(hashPw(String(newPassword), salt), salt, u.id);
+  res.json({ ok: true });
+}));
+
+/* ════════════════ CUSTOMER · ORDER CANCEL (pending/confirmed; restocks) ════════════════ */
+app.post("/api/my/orders/:id/cancel", requireAuth, asyncWrap(async (req, res) => {
+  const o = db.prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?").get(Number(req.params.id), req.user.id);
+  if (!o) return res.status(404).json({ error: "Order not found" });
+  if (!["pending", "confirmed"].includes(o.status)) {
+    return res.status(409).json({ error: `This order can no longer be cancelled — it is ${o.status}. Chat on WhatsApp and we'll do our best.` });
+  }
+  const items = parseItems(o.items_json);
+  db.exec("BEGIN");
+  try {
+    db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?").run(o.id);
+    const inc = db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?");
+    for (const it of items) inc.run(Math.max(1, Number(it.qty) || 1), it.id);
+    if (o.coupon_code) db.prepare("UPDATE coupons SET used = MAX(0, used - 1) WHERE code = ?").run(o.coupon_code);
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
+  res.json({ ok: true, status: "cancelled" });
+}));
+
+/* ════════════════ PUBLIC OFFERS (checkout coupon chips) ════════════════ */
+app.get("/api/coupons/offers", (req, res) => {
+  const rows = db.prepare("SELECT code,type,value,min_order FROM coupons WHERE active = 1 AND (max_uses = 0 OR used < max_uses) ORDER BY value DESC, code").all();
+  res.json({ offers: rows.map(c => ({ code: c.code, type: c.type, value: c.value, min_order: c.min_order })) });
+});
+
+/* ════════════════ ADMIN · CSV EXPORTS ════════════════ */
+const csvCell = (v) => { const s = String(v ?? ""); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const sendCsv = (res, filename, header, rows) => {
+  const body = "\uFEFF" + [header.map(csvCell).join(","), ...rows.map(r => r.map(csvCell).join(","))].join("\r\n");
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(body);
+};
+app.get("/api/admin/orders.csv", requireAdmin, (req, res) => {
+  const status = String(req.query.status || "").trim();
+  const from = String(req.query.from || "").trim();
+  const to = String(req.query.to || "").trim();
+  const q = String(req.query.q || "").trim().toLowerCase();
+  let rows = db.prepare(`SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id = o.user_id
+                         ORDER BY datetime(o.created_at) DESC, o.id DESC LIMIT 5000`).all();
+  if (status && status !== "all") rows = rows.filter(o => o.status === status);
+  if (from) rows = rows.filter(o => String(o.created_at).slice(0, 10) >= from);
+  if (to)   rows = rows.filter(o => String(o.created_at).slice(0, 10) <= to);
+  if (q)    rows = rows.filter(o => [o.id, o.customer_name, o.phone, o.user_email, o.coupon_code, o.address].some(v => String(v ?? "").toLowerCase().includes(q)));
+  const header = ["Order","Placed","Customer","Phone","Email","Items","Subtotal","Discount","Delivery","Total","Payment","Delivery method","Coupon","Status","Address","Note"];
+  const body = rows.map(o => {
+    const items = parseItems(o.items_json);
+    const sub = items.reduce((s, i) => s + i.price * i.qty, 0);
+    const delivery = Math.max(0, o.total - sub + (o.discount || 0));
+    return [o.id, o.created_at, o.customer_name, o.phone, o.user_email || "",
+            items.map(i => `${i.qty}x ${i.name}`).join("; "), sub, o.discount || 0, delivery, o.total,
+            o.payment, o.delivery_method || "standard", o.coupon_code || "", o.status, o.address, o.note];
+  });
+  sendCsv(res, "orders.csv", header, body);
+});
+app.get("/api/admin/products.csv", requireAdmin, (req, res) => {
+  const rows = db.prepare("SELECT * FROM products ORDER BY created_at, id").all();
+  sendCsv(res, "products.csv", ["ID","Name","Tag","Price","MRP","Rating","Stock","Active","Reviews"],
+    rows.map(p => [p.id, p.name, p.tag, p.price, p.was, p.rating, p.stock, p.active ? "yes" : "no", p.reviews || 0]));
+});
 
 /* ════════════════ ADMIN API ════════════════ */
 app.get("/api/admin/stats", requireAdmin, (req, res) => {
@@ -731,6 +890,7 @@ app.put("/api/admin/store-config", requireAdmin, asyncWrap(async (req, res) => {
   }
   if (body.freeAt !== undefined)      setSetting("free_at",     num(body.freeAt, 0, 100000, 999));
   if (body.deliveryFee !== undefined) setSetting("deliver_fee", num(body.deliveryFee, 0, 1000, 49));
+  if (body.expressFee !== undefined)  setSetting("express_fee", num(body.expressFee, 0, 1000, 99));
   if (body.codEnabled !== undefined)  setSetting("cod_enabled", boolish(body.codEnabled));
   if (body.codMin !== undefined)      setSetting("cod_min",     num(body.codMin, 0, 100000, 0));
   if (body.maxQty !== undefined)      setSetting("max_qty",     num(body.maxQty, 1, 99, 99));
@@ -839,7 +999,7 @@ app.get("/product/:id", (req, res) => {
 /* ════════════════ SITEMAP + ROBOTS (publicity) ════════════════ */
 app.get("/sitemap.xml", (req, res) => {
   const base = `${req.protocol}://${req.get("host")}`;
-  const urls = ["/", "/services.html", "/hosting.html", "/store.html", "/contact.html", "/login.html"];
+  const urls = ["/", "/services.html", "/hosting.html", "/store.html", "/contact.html", "/policies.html", "/login.html"];
   const prods = db.prepare("SELECT id, created_at FROM products WHERE active = 1 ORDER BY id").all();
   const today = new Date().toISOString().slice(0, 10);
   const xml = `<?xml version="1.0" encoding="UTF-8"?>

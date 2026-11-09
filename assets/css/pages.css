@@ -629,3 +629,15 @@ body{ background:var(--cream); }
 
 /* reorder button used as invoice link on dashboard */
 .invoice-link{ text-decoration:none; display:inline-flex; align-items:center }
+
+
+/* ══════════ PINCODE ETA CHECKER (product page) ══════════ */
+.pincode-check{ margin:.35rem 0 .1rem; }
+.pincode-label{ display:block; font-size:.62rem; font-weight:800; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); margin-bottom:.28rem; }
+.pincode-row{ display:flex; gap:.4rem; max-width:320px; }
+.pincode-row input{ flex:1; min-width:0; border:1.5px solid var(--line); border-radius:10px; padding:.45rem .6rem; font-size:.9rem; background:#fff; letter-spacing:.12em; }
+.pincode-row input:focus{ outline:2px solid var(--orange); border-color:transparent; }
+.pincode-row input.is-bad{ outline:2px solid #DC2626; border-color:transparent; background:#FEF2F2; }
+.pincode-msg{ font-size:.72rem; color:var(--muted); margin:.28rem 0 0; min-height:1.15em; }
+.pincode-msg.is-ok{ color:var(--green); font-weight:700; }
+.pincode-msg.is-bad{ color:#B91C1C; }

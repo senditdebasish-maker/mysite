@@ -44,6 +44,7 @@ function dd_store_config(): array {
     'announce'    => (string) dd_get_setting('announce'),
     'freeAt'      => (int) dd_num_setting('free_at', 999),
     'deliveryFee' => (int) dd_num_setting('deliver_fee', 49),
+    'expressFee'  => (int) dd_num_setting('express_fee', 99),
     'codEnabled'  => dd_get_setting('cod_enabled') === '1',
     'codMin'      => (int) dd_num_setting('cod_min', 0),
     'maxQty'      => (int) dd_num_setting('max_qty', 99),
@@ -104,26 +105,29 @@ function dd_wipe_all_tables(): void {
   try { $db->exec('VACUUM'); } catch (Throwable $e) {}
 }
 
-/* ════════════════ passwords ════════════════ */
-function dd_hash_password(string $pw): string {
-  return password_hash($pw, PASSWORD_BCRYPT);
+/* ════════════════ passwords ════════════════
+   Stored format is byte-compatible with the Node edition: randomBytes(16) salt
+   as a 32-char hex STRING used as the scrypt salt, 128-hex output — so a
+   database written by either edition opens cleanly in the other. (DBs written
+   by an interim bcrypt build are still accepted via password_verify.) */
+function dd_new_salt(): string { return bin2hex(random_bytes(16)); }
+function dd_scrypt_hex(string $pw, string $saltStr): string {
+  require_once __DIR__ . '/scrypt.php';
+  return bin2hex(scrypt_hash($pw, $saltStr, 16384, 8, 1, 64));
 }
-/** Verify against bcrypt (new) or Node scrypt (legacy). Rehashes legacy → bcrypt. */
+function dd_password_pair(string $pw): array {
+  $salt = dd_new_salt();
+  return ['hash' => dd_scrypt_hex($pw, $salt), 'salt' => $salt];
+}
 function dd_verify_password(string $pw, array $u): bool {
   $hash = (string) ($u['password_hash'] ?? '');
   $salt = (string) ($u['password_salt'] ?? '');
-  if ($salt !== 'bcrypt' && strlen($hash) === 128 && $salt !== '') {
+  if ($salt === 'bcrypt') return password_verify($pw, $hash);
+  if ($salt !== '' && strlen($hash) === 128) {
     require_once __DIR__ . '/scrypt.php';
-    $ok = scrypt_verify_node($pw, $salt, $hash);
-    if ($ok) {
-      try {
-        $new = dd_hash_password($pw);
-        dd_db()->prepare("UPDATE users SET password_hash = ?, password_salt = 'bcrypt' WHERE id = ?")->execute([$new, $u['id']]);
-      } catch (Throwable $e) { /* keep the legacy hash — login still works */ }
-    }
-    return $ok;
+    return scrypt_verify_node($pw, $salt, $hash);
   }
-  return password_verify($pw, $hash);
+  return false;
 }
 
 /* ════════════════ sessions ════════════════ */

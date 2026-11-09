@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Checkout — Debasish Das · Web Studio &amp; Store</title>
+<meta name="description" content="Secure checkout for The Shelf — COD & UPI on delivery, express delivery available, GST-inclusive honest pricing with a proper invoice." />
+<meta name="robots" content="noindex" />
+<meta name="theme-color" content="#FAF6EF" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23141414'/%3E%3Ctext x='26' y='45' font-family='Georgia,serif' font-weight='700' font-size='38' fill='%23FAF6EF' text-anchor='middle'%3Ed%3C/text%3E%3Ccircle cx='45' cy='43' r='5.5' fill='%23E8542F'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Inter:wght@400..800&family=Caveat:wght@600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/styles.css" />
+<link rel="stylesheet" href="assets/css/app.css" />
+<link rel="stylesheet" href="assets/css/pages.css" />
+<link rel="stylesheet" href="assets/css/checkout.css" />
+</head>
+<body>
+
+<a class="skip-link" href="#checkoutForm">Skip to checkout</a>
+
+<!-- ══════════ NAV ══════════ -->
+<header class="co-nav">
+  <a class="wordmark" href="index.html" aria-label="Debasish Das — home">debasish<span class="wm-dot">.</span></a>
+  <span class="co-secure">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.4"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+    Secure checkout
+  </span>
+  <a class="co-back" href="store.html">← Back to the Store</a>
+</header>
+
+<main class="checkout-shell" id="main">
+
+  <!-- ══════════ EMPTY CART STATE ══════════ -->
+  <div class="co-empty" id="coEmpty" hidden style="grid-column:1/-1">
+    <svg viewBox="0 0 64 64" width="72" height="72" fill="none" stroke="#E8542F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 18h36l-4 34a6 6 0 0 1-6 5H24a6 6 0 0 1-6-5l-4-34z"/><path d="M24 28V16a8 8 0 0 1 16 0v12"/></svg>
+    <p style="margin:0"><strong style="font-size:1.1rem">Your cart is empty.</strong></p>
+    <p class="muted" style="margin:0 0 .5rem">Pick something from the shelf first — the copper bottle is a crowd favourite.</p>
+    <a class="btn btn-ink" href="store.html">Browse the Store →</a>
+  </div>
+
+  <!-- ══════════ CHECKOUT FORM ══════════ -->
+  <form class="co-main-col" id="checkoutForm" novalidate hidden>
+    <p class="co-kicker">Almost yours</p>
+    <h1 class="co-title">Checkout</h1>
+
+    <!-- STEP 1 — contact -->
+    <section class="co-card" aria-labelledby="step1Title">
+      <div class="co-step"><span class="co-step-n">1</span><h2 id="step1Title">Contact</h2></div>
+      <div class="co-whoami" id="whoamiBar" hidden>
+        <span>Ordering as <strong id="whoamiName">you</strong> · orders show up in your account</span>
+        <a href="dashboard.html">My orders →</a>
+      </div>
+      <p class="co-guest-note" id="guestNote">Checking out as guest — <a href="login.html?next=checkout.html">sign in</a> to save addresses &amp; track orders.</p>
+      <div class="co-grid2">
+        <label class="field">Your name<input type="text" id="coName" placeholder="Rohit Sharma" required autocomplete="name" /></label>
+        <label class="field">Phone (for delivery updates)<input type="tel" id="coPhone" placeholder="+91 98765 43210" required autocomplete="tel" /></label>
+      </div>
+    </section>
+
+    <!-- STEP 2 — delivery address -->
+    <section class="co-card" aria-labelledby="step2Title">
+      <div class="co-step"><span class="co-step-n">2</span><h2 id="step2Title">Delivery address</h2></div>
+
+      <div class="addr-list" id="addrList" hidden></div>
+
+      <button type="button" class="addr-new-toggle" id="addrNewToggle" hidden>+ Add a new address</button>
+
+      <div class="new-address-form" id="newAddressForm">
+        <div class="co-grid2">
+          <label class="field">Label<input type="text" id="naLabel" placeholder="Home / Office…" maxlength="24" autocomplete="off" /></label>
+          <label class="field">Recipient name<input type="text" id="naName" placeholder="Rohit Sharma" autocomplete="name" /></label>
+        </div>
+        <div class="co-grid2">
+          <label class="field">Phone<input type="tel" id="naPhone" placeholder="+91 98765 43210" autocomplete="tel" /></label>
+          <label class="field">PIN code<input type="text" id="naPin" placeholder="700029" inputmode="numeric" maxlength="6" autocomplete="postal-code" /></label>
+        </div>
+        <label class="field">Address line<input type="text" id="naLine" placeholder="House / flat, street, area, landmark" autocomplete="street-address" /></label>
+        <div class="co-grid2">
+          <label class="field">City<input type="text" id="naCity" placeholder="Kolkata" autocomplete="address-level2" /></label>
+          <label class="field">State<input type="text" id="naState" placeholder="West Bengal" autocomplete="address-level1" /></label>
+        </div>
+        <label class="save-to-book" id="saveToBookWrap" hidden><input type="checkbox" id="naSave" checked /> Save to my address book</label>
+        <p class="co-error" id="addrError" hidden></p>
+      </div>
+    </section>
+
+    <!-- STEP 3 — delivery speed -->
+    <section class="co-card" aria-labelledby="step3Title">
+      <div class="co-step"><span class="co-step-n">3</span><h2 id="step3Title">Delivery speed</h2></div>
+      <div class="radio-cards" id="deliveryChoices">
+        <label class="radio-card is-active" data-method="standard">
+          <input type="radio" name="delivery_method" value="standard" checked />
+          <span>
+            <span class="rc-head"><span class="rc-title">Standard</span><span class="rc-price" id="stdFeeLabel">₹49</span></span>
+            <span class="rc-sub">3–6 business days · <span id="stdFreeHint">free above ₹999</span></span>
+          </span>
+        </label>
+        <label class="radio-card" data-method="express">
+          <input type="radio" name="delivery_method" value="express" />
+          <span>
+            <span class="rc-head"><span class="rc-title">Express</span><span class="rc-price" id="expFeeLabel">₹99</span></span>
+            <span class="rc-sub">1–2 business days · flat fee, any order size</span>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <!-- STEP 4 — payment -->
+    <section class="co-card" aria-labelledby="step4Title">
+      <div class="co-step"><span class="co-step-n">4</span><h2 id="step4Title">Payment</h2></div>
+      <div class="radio-cards" id="paymentChoices">
+        <label class="radio-card is-active" data-pay="cod">
+          <input type="radio" name="payment" value="cod" checked />
+          <span>
+            <span class="rc-head"><span class="rc-title">Cash on Delivery</span></span>
+            <span class="rc-sub" id="codSub">Pay the courier when your parcel arrives</span>
+          </span>
+        </label>
+        <label class="radio-card" data-pay="upi">
+          <input type="radio" name="payment" value="upi" />
+          <span>
+            <span class="rc-head"><span class="rc-title">UPI on Delivery</span></span>
+            <span class="rc-sub">UPI collect link / QR on arrival — same speed, zero cash</span>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <!-- STEP 5 — notes -->
+    <section class="co-card" aria-labelledby="step5Title">
+      <div class="co-step"><span class="co-step-n">5</span><h2 id="step5Title">Order notes <span class="co-optional">optional</span></h2></div>
+      <label class="field" style="text-transform:none; letter-spacing:0; font-weight:500"><span class="sr-only" hidden>Notes</span><textarea id="coNote" rows="2" placeholder="e.g. deliver after 6 PM, call on arrival, gift wrap…" style="text-transform:none; font-weight:500"></textarea></label>
+    </section>
+  </form>
+
+  <!-- ══════════ ORDER SUMMARY ══════════ -->
+  <aside class="co-summary" id="coSummary" aria-label="Order summary" hidden>
+    <h2>Order summary <span class="co-summary-count" id="sumCount">0 items</span></h2>
+    <ul class="co-line-items" id="sumItems"></ul>
+
+    <div class="co-coupon">
+      <input type="text" id="couponInput" placeholder="Coupon code" autocomplete="off" spellcheck="false" aria-label="Coupon code" />
+      <button type="button" id="applyCoupon">Apply</button>
+    </div>
+    <div class="co-offers" id="offerChips" aria-label="Available offers"></div>
+    <p class="coupon-msg" id="couponMsg" role="status"></p>
+
+    <div class="co-totals">
+      <div class="co-total-row"><span>Subtotal</span><span id="sumSub">₹0</span></div>
+      <div class="co-total-row co-total-discount" id="sumDiscountRow" hidden><span>Coupon <b id="sumCouponCode"></b></span><span>−<span id="sumDiscount">₹0</span></span></div>
+      <div class="co-total-row"><span>Delivery <span id="sumMethodLabel">(standard)</span></span><span id="sumDelivery">₹0</span></div>
+      <div class="co-total-row co-total-grand"><span>Total</span><strong id="sumTotal">₹0</strong></div>
+      <div class="co-total-row co-gst"><span>Inclusive of 18% GST</span><span id="sumGst">₹0</span></div>
+    </div>
+
+    <button type="submit" form="checkoutForm" class="co-place" id="placeOrderBtn">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8 4.5v9L12 20l-8-4.5v-9L12 2z"/><path d="M12 22V11"/></svg>
+      <span id="placeOrderLabel">Place order · ₹0</span>
+    </button>
+    <p class="co-place-note">No payment now — COD / UPI on delivery · you’ll get an invoice with your parcel</p>
+
+    <div class="co-trust" aria-label="Trust badges">
+      <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>GST invoice</span>
+      <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>7-day returns</span>
+      <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>COD &amp; UPI</span>
+      <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Dispatch in 1–2 days</span>
+    </div>
+    <p class="co-policy-links">By placing this order you agree to the <a href="policies.html#shipping">shipping</a>, <a href="policies.html#returns">returns</a> &amp; <a href="policies.html#terms">terms</a> policies.</p>
+  </aside>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="assets/js/ui.js" defer></script>
+<script src="assets/js/store-core.js" defer></script>
+<script src="assets/js/checkout.js" defer></script>
+</body>
+</html>

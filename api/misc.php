@@ -7,7 +7,7 @@ function dd_misc_handle(string $what, array $req): array {
   dd_boot_seed(); // idempotent: sitemap lists seeded products
   $base = dd_base_url($req);
   if ($what === 'sitemap') {
-    $urls = ['/', '/services.html', '/hosting.html', '/store.html', '/contact.html', '/login.html'];
+    $urls = ['/', '/services.html', '/hosting.html', '/store.html', '/contact.html', '/policies.html', '/login.html'];
     $prods = dd_db()->query('SELECT id FROM products WHERE active = 1 ORDER BY id')->fetchAll();
     $today = gmdate('Y-m-d');
     $xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n";

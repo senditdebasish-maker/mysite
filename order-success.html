@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Order placed — Debasish Das · Web Studio &amp; Store</title>
+<meta name="robots" content="noindex" />
+<meta name="theme-color" content="#FAF6EF" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23141414'/%3E%3Ctext x='26' y='45' font-family='Georgia,serif' font-weight='700' font-size='38' fill='%23FAF6EF' text-anchor='middle'%3Ed%3C/text%3E%3Ccircle cx='45' cy='43' r='5.5' fill='%23E8542F'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Inter:wght@400..800&family=Caveat:wght@600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/styles.css" />
+<link rel="stylesheet" href="assets/css/app.css" />
+<link rel="stylesheet" href="assets/css/pages.css" />
+<style>
+  .success-wrap{ min-height:100dvh; display:flex; align-items:center; justify-content:center; padding:2rem 1rem; background:var(--cream); }
+  .success-card{ width:min(560px,100%); background:var(--paper); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:clamp(1.4rem,4vw,2.2rem); text-align:center; }
+  .success-check{ width:76px; height:76px; margin:0 auto .8rem; stroke:var(--green); }
+  .success-kicker{ font-size:.68rem; font-weight:800; letter-spacing:.18em; text-transform:uppercase; color:var(--green); margin:0; }
+  .success-title{ font-family:var(--font-display); font-weight:900; letter-spacing:-.02em; font-size:clamp(1.6rem,4.5vw,2.2rem); margin:.25rem 0 .35rem; }
+  .success-id{ font-family:var(--font-display); font-weight:900; color:var(--orange-deep); }
+  .success-sub{ color:var(--muted); font-size:.88rem; margin:0 auto 1rem; max-width:44ch; }
+  .success-meta{ background:var(--cream); border:1px solid var(--line); border-radius:14px; padding:.7rem .9rem; text-align:left; font-size:.84rem; display:flex; flex-direction:column; gap:.3rem; margin-bottom:.9rem; }
+  .success-meta .row{ display:flex; justify-content:space-between; gap:1rem; }
+  .success-meta .row span:first-child{ color:var(--muted); }
+  .success-meta .row strong{ font-weight:800; }
+  .success-items{ list-style:none; margin:0 0 .9rem; padding:0; text-align:left; font-size:.8rem; color:var(--ink-soft); display:flex; flex-direction:column; gap:.22rem; max-height:150px; overflow:auto; }
+  .success-items li{ display:flex; justify-content:space-between; gap:.8rem; border-bottom:1px dashed var(--line); padding:.2rem 0; }
+  .success-actions{ display:flex; gap:.5rem; justify-content:center; flex-wrap:wrap; }
+  .success-wa{ font-size:.72rem; color:var(--muted); margin-top:.8rem; }
+</style>
+</head>
+<body>
+
+<main class="success-wrap" id="main">
+  <div class="success-card" role="status">
+    <svg class="success-check" viewBox="0 0 64 64" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="32" cy="32" r="28" opacity=".3"/><path d="M20 33.5l8.5 8L44 24"/></svg>
+    <p class="success-kicker" id="successKicker">Order confirmed</p>
+    <h1 class="success-title">Thank you! <span class="success-id" id="orderId">#0</span> is on its way.</h1>
+    <p class="success-sub" id="successSub">We’ve reserved your items. Confirm on WhatsApp if it just opened — then track delivery status in your account.</p>
+
+    <div class="success-meta" id="successMeta">
+      <div class="row"><span>Total</span><strong id="metaTotal">₹0</strong></div>
+      <div class="row"><span>Payment</span><span id="metaPayment">Cash on Delivery</span></div>
+      <div class="row"><span>Delivery</span><span id="metaDelivery">Standard · 3–6 days</span></div>
+      <div class="row"><span>Deliver to</span><span id="metaAddress" style="text-align:right; max-width:30ch">—</span></div>
+    </div>
+    <ul class="success-items" id="successItems"></ul>
+
+    <div class="success-actions">
+      <a class="btn btn-ink" id="trackBtn" href="dashboard.html">Track my order →</a>
+      <a class="btn btn-ghost" href="store.html">Continue shopping</a>
+    </div>
+    <p class="success-wa">Order queries? Chat on WhatsApp — mention your order number. <a href="policies.html#returns" style="color:var(--orange-deep); font-weight:700">7-day easy returns</a> on everything.</p>
+  </div>
+</main>
+
+<script src="assets/js/ui.js" defer></script>
+<script>
+(function () {
+  const $ = (s) => document.querySelector(s);
+  const fmt = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const params = new URLSearchParams(location.search);
+  const waMode = params.get("wa") === "1";
+  let order = null;
+  try { order = JSON.parse(sessionStorage.getItem("dd_last_order") || "null"); } catch { order = null; }
+  const qid = params.get("order");
+
+  if (waMode) {
+    $("#successKicker").textContent = "Sent via WhatsApp";
+    $("#orderId").textContent = "";
+    $(".success-title").innerHTML = "Almost done — confirm on WhatsApp!";
+    $("#successSub").textContent = "Your order details were sent to the store on WhatsApp. The store will confirm stock, delivery date and the final amount there.";
+    $("#metaPayment").textContent = order?.payment === "upi" ? "UPI on delivery" : "Cash on Delivery";
+    $("#metaDelivery").textContent = order?.delivery_method === "express" ? "Express · 1–2 days" : "Standard · 3–6 days";
+    $("#metaTotal").textContent = order ? fmt(order.total) : "—";
+    $("#metaAddress").textContent = order?.address || "—";
+    $("#trackBtn").textContent = "Continue shopping →";
+    $("#trackBtn").href = "store.html";
+  } else if (order) {
+    $("#orderId").textContent = "#" + (order.id ?? qid ?? "");
+    $("#metaTotal").textContent = fmt(order.total) + (order.discount ? ` (saved ${fmt(order.discount)})` : "");
+    $("#metaPayment").textContent = order.payment === "upi" ? "UPI on delivery" : "Cash on Delivery";
+    $("#metaDelivery").textContent = order.delivery_method === "express" ? "Express · 1–2 business days" : "Standard · 3–6 business days";
+    $("#metaAddress").textContent = order.address || "—";
+    $("#trackBtn").href = order.signedIn ? "dashboard.html" : "login.html?next=dashboard.html";
+    $("#trackBtn").textContent = order.signedIn ? "Track my order →" : "Sign in to track orders →";
+    const items = Array.isArray(order.items) ? order.items : [];
+    $("#successItems").innerHTML = items.map(i => `<li><span>${esc(i.qty)} × ${esc(i.name)}</span><span>${i.price ? fmt(i.price * i.qty) : ""}</span></li>`).join("");
+    if (order.coupon) $("#successSub").textContent = `Coupon ${order.coupon} applied. We’ve reserved your items — a GST invoice ships with your parcel.`;
+  } else {
+    // deep-linked without stash (e.g. refreshed page) — show the essentials from the URL
+    $("#orderId").textContent = qid ? "#" + qid : "";
+    $(".success-title").innerHTML = `Order received. <span class="success-id">${qid ? "#" + esc(qid) : ""}</span>`;
+    $("#successSub").textContent = "Your order is saved with the store. Track delivery status from your account, or reach out on WhatsApp.";
+    $("#metaTotal").textContent = "—"; $("#metaPayment").textContent = "—"; $("#metaDelivery").textContent = "—"; $("#metaAddress").textContent = "—";
+  }
+  try { sessionStorage.removeItem("dd_last_order"); } catch {}
+})();
+</script>
+</body>
+</html>

@@ -34,7 +34,11 @@
   let me = null;
   let currentTab = "overview";
   let orderFilter = "all";
+  let orderQuery = "";
+  let orderFrom = "";
+  let orderTo = "";
   let ordersCache = [];
+  let productFilter = "all";
   let productsCache = [];
   let editingId = null;
 
@@ -118,9 +122,13 @@
     const waText = encodeURIComponent(`Hi ${o.customer_name}! Regarding your order #${o.id} — `);
     const waPhone = String(o.phone || "").replace(/[^\d]/g, "");
     const waLink = waPhone.length >= 10 ? `https://wa.me/${waPhone}?text=${waText}` : null;
+    const deliveryBadge = o.delivery_method === "express"
+      ? '<span class="pay-chip" style="color:#7C3AED">Express</span>'
+      : "";
     return `
       <tr>
-        <td><strong>#${o.id}</strong></td>
+        <td class="bulk-cell"><input type="checkbox" class="bulk-row" data-bulk-id="${o.id}" aria-label="Select order #${o.id}" /></td>
+        <td><strong>#${o.id}</strong>${deliveryBadge ? "<br>" + deliveryBadge : ""}</td>
         <td>
           ${esc(o.customer_name)}
           <br /><span class="muted" style="font-size:.72rem">${esc(o.phone || "no phone")}${o.user_email ? " · " + esc(o.user_email) : " · guest"}</span>
@@ -140,13 +148,87 @@
       </tr>`;
   }
 
+  const orderHaystack = (o) => [o.id, o.customer_name, o.phone, o.user_email, o.coupon_code, o.address, o.note]
+    .map(v => String(v ?? "").toLowerCase()).join(" ");
+  const orderInRange = (o) => {
+    const day = String(o.created_at || "").slice(0, 10);
+    if (orderFrom && day < orderFrom) return false;
+    if (orderTo && day > orderTo) return false;
+    return true;
+  };
+  const visibleOrders = () => ordersCache.filter(o =>
+    (orderFilter === "all" || o.status === orderFilter) &&
+    (!orderQuery || orderHaystack(o).includes(orderQuery)) &&
+    orderInRange(o)
+  );
+
+  function syncOrdersCsvLink() {
+    const params = new URLSearchParams();
+    if (orderFilter !== "all") params.set("status", orderFilter);
+    if (orderFrom) params.set("from", orderFrom);
+    if (orderTo) params.set("to", orderTo);
+    if (orderQuery) params.set("q", orderQuery);
+    $("#ordersCsvLink").href = "api/admin/orders.csv" + (params.toString() ? "?" + params.toString() : "");
+    $("#ordersCsvClear").hidden = !(orderFrom || orderTo || orderQuery);
+  }
+
+  function syncBulkBar() {
+    const checked = $$("#ordersBody .bulk-row:checked").length;
+    $("#bulkCount").textContent = String(checked);
+    $("#bulkApply").disabled = checked === 0;
+    $("#bulkBar").hidden = visibleOrders().length === 0;
+    const allShown = $$("#ordersBody .bulk-row");
+    $("#headSelectAll").checked = allShown.length > 0 && allShown.every(c => c.checked);
+    $("#bulkSelectAll").checked = $("#headSelectAll").checked;
+  }
+
   async function loadOrders() {
-    if (!ordersCache.length) ordersCache = (await fetchJSON("api/admin/orders")).orders || [];
-    else ordersCache = (await fetchJSON("api/admin/orders")).orders || [];
-    const rows = ordersCache.filter(o => orderFilter === "all" || o.status === orderFilter);
+    ordersCache = (await fetchJSON("api/admin/orders")).orders || [];
+    syncOrdersCsvLink();
+    const rows = visibleOrders();
     $("#ordersBody").innerHTML = rows.map(orderRow).join("");
     $("#ordersEmptyNote").hidden = rows.length !== 0;
+    syncBulkBar();
   }
+
+  $("#ordersBody").addEventListener("change", (e) => {
+    if (e.target.closest(".bulk-row")) syncBulkBar();
+  });
+  $("#orderSearch").addEventListener("input", (e) => {
+    orderQuery = e.target.value.trim().toLowerCase();
+    syncOrdersCsvLink();
+    clearTimeout(window.__orderSearchT);
+    window.__orderSearchT = setTimeout(() => loadOrders().catch(err => toast(err.message)), 180);
+  });
+  $("#orderFrom").addEventListener("change", (e) => { orderFrom = e.target.value; loadOrders().catch(err => toast(err.message)); });
+  $("#orderTo").addEventListener("change", (e) => { orderTo = e.target.value; loadOrders().catch(err => toast(err.message)); });
+  $("#ordersCsvClear").addEventListener("click", () => {
+    orderFrom = orderTo = orderQuery = "";
+    $("#orderSearch").value = ""; $("#orderFrom").value = ""; $("#orderTo").value = "";
+    loadOrders().catch(err => toast(err.message));
+  });
+  const toggleAllShown = (checked) => { $$("#ordersBody .bulk-row").forEach(c => { c.checked = checked; }); syncBulkBar(); };
+  $("#headSelectAll").addEventListener("change", (e) => toggleAllShown(e.target.checked));
+  $("#bulkSelectAll").addEventListener("change", (e) => toggleAllShown(e.target.checked));
+  $("#bulkApply").addEventListener("click", async () => {
+    const ids = $$("#ordersBody .bulk-row:checked").map(c => Number(c.dataset.bulkId));
+    if (!ids.length) return;
+    const status = $("#bulkStatus").value;
+    if (!window.confirm(`Set ${ids.length} order(s) to “${statusLabel[status] || status}”?`)) return;
+    const btn = $("#bulkApply"); btn.disabled = true;
+    let done = 0, failed = 0;
+    for (const id of ids) {
+      try {
+        await fetchJSON(`api/admin/orders/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) });
+        const o = ordersCache.find(x => x.id === id); if (o) o.status = status;
+        done++;
+      } catch { failed++; }
+    }
+    toast(`${done} order(s) → <b>${statusLabel[status] || status}</b>${failed ? ` · ${failed} failed` : ""}`);
+    btn.disabled = false;
+    loadOrders().catch(() => {});
+    loadOverview().catch(() => {});
+  });
 
   $("#ordersBody").addEventListener("change", async (e) => {
     const sel = e.target.closest("select[data-status-id]");
@@ -194,10 +276,26 @@
       </div>`;
   }
 
+  const productVisible = (p) => {
+    if (productFilter === "low") return p.stock > 0 && p.stock <= 5;
+    if (productFilter === "out") return p.stock <= 0;
+    if (productFilter === "hidden") return !p.active;
+    return true;
+  };
   async function loadProducts() {
     productsCache = (await fetchJSON("api/admin/products")).products || [];
-    $("#productsList").innerHTML = productsCache.map(productRow).join("") || `<p class="muted">No products yet — add your first one.</p>`;
+    const rows = productsCache.filter(productVisible);
+    $("#productsList").innerHTML = rows.map(productRow).join("") ||
+      (productFilter === "all"
+        ? `<p class="muted">No products yet — add your first one.</p>`
+        : `<p class="muted">No products in this bucket — nice.</p>`);
   }
+  $("#productFilterChips").addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip"); if (!chip) return;
+    productFilter = chip.dataset.pfilter;
+    $$("#productFilterChips .chip").forEach(c => c.classList.toggle("is-active", c === chip));
+    loadProducts().catch(err => toast(err.message));
+  });
 
   // editor modal
   const editor = $("#productEditor");
@@ -341,7 +439,7 @@
     $("#sfUnits").textContent = String(cfg.unitsInStock || 0);
     $("#sfLow").textContent = `${cfg.lowStock || 0} low · ${cfg.outOfStock || 0} out`;
     $("#sfFreeAt").textContent = inr(cfg.freeAt || 0);
-    $("#sfFee").textContent = `${inr(cfg.deliveryFee || 0)} below that`;
+    $("#sfFee").textContent = `${inr(cfg.deliveryFee || 0)} below that · express ${inr(cfg.expressFee ?? 99)}`;
     $("#sfPayment").textContent = cfg.codEnabled ? "COD + UPI" : "UPI only";
     $("#sfLive").textContent = cfg.storeLive ? "Store is live" : "Store is CLOSED";
     $("#sfLive").className = "stat-foot " + (cfg.storeLive ? "good" : "bad");
@@ -350,6 +448,7 @@
     $("#sfAnnounce").value = cfg.announce || "";
     $("#sfFreeAtInput").value = cfg.freeAt ?? 999;
     $("#sfFeeInput").value = cfg.deliveryFee ?? 49;
+    $("#sfExpressFeeInput").value = cfg.expressFee ?? 99;
     $("#sfMaxQty").value = cfg.maxQty ?? 99;
     $("#sfCodEnabled").checked = !!cfg.codEnabled;
     $("#sfCodMin").value = cfg.codMin ?? 0;
@@ -386,6 +485,7 @@
         announce: $("#sfAnnounce").value,
         freeAt: $("#sfFreeAtInput").value,
         deliveryFee: $("#sfFeeInput").value,
+        expressFee: $("#sfExpressFeeInput").value,
         maxQty: $("#sfMaxQty").value,
         codEnabled: $("#sfCodEnabled").checked,
         codMin: $("#sfCodMin").value,
