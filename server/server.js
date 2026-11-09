@@ -813,8 +813,24 @@ app.get("/product/:id", (req, res) => {
 
   const template = productTemplate();
   if (!template) return res.status(500).send("Product template missing");
-  const repl = { "__PRODUCT_ID_TOKEN__": p.id, "__BASE__": base, "__TITLE__": escHtml(title), "__DESC__": escHtml(desc), "__OG_IMAGE__": imgAbs, "__CANONICAL__": url, "__JSONLD__": jsonld };
-  const html = Object.entries(repl).reduce((acc, [k, v]) => acc.split(k).join(v), template);
+  /* full-tag substitution — works with the static-default HEAD in product.html */
+  const tEsc = escHtml(title), dEsc = escHtml(desc);
+  let html = String(template)
+    .replace(/<title>[^<]*<\/title>/, `<title>${tEsc}</title>`)
+    .replace(/<meta name="description" content="[^"]*"\s*\/>/, `<meta name="description" content="${dEsc}" />`)
+    .replace(/<link rel="canonical" href="[^"]*"\s*\/>/, `<link rel="canonical" href="${url}" />`)
+    .replace(/<meta property="og:title" content="[^"]*"\s*\/>/, `<meta property="og:title" content="${tEsc}" />`)
+    .replace(/<meta property="og:description" content="[^"]*"\s*\/>/, `<meta property="og:description" content="${dEsc}" />`)
+    .replace(/<meta property="og:url" content="[^"]*"\s*\/>/, `<meta property="og:url" content="${url}" />`)
+    .replace(/<meta property="og:image" content="[^"]*"\s*\/>/, `<meta property="og:image" content="${imgAbs}" />`)
+    .replace(/<meta property="og:image:alt" content="[^"]*"\s*\/>/, `<meta property="og:image:alt" content="${tEsc}" />`)
+    .replace(/<meta name="twitter:title" content="[^"]*"\s*\/>/, `<meta name="twitter:title" content="${tEsc}" />`)
+    .replace(/<meta name="twitter:description" content="[^"]*"\s*\/>/, `<meta name="twitter:description" content="${dEsc}" />`)
+    .replace(/<meta name="twitter:image" content="[^"]*"\s*\/>/, `<meta name="twitter:image" content="${imgAbs}" />`)
+    .replace(/<script type="application\/ld\+json" id="productJsonLd">[^<]*<\/script>/, `<script type="application/ld+json" id="productJsonLd">${jsonld}</script>`);
+  for (const [k, v] of Object.entries({ "__PRODUCT_ID_TOKEN__": p.id, "__BASE__": base, "__TITLE__": tEsc, "__DESC__": dEsc, "__OG_IMAGE__": imgAbs, "__CANONICAL__": url, "__JSONLD__": jsonld })) {
+    html = html.split(k).join(v);
+  }
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");
   res.send(html);

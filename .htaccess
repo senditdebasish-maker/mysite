@@ -1,4 +1,44 @@
-# Static hosts (InfinityFree/Apache/LiteSpeed): map canonical product URLs
-# to the single-product page. The Node server does this itself at runtime.
-RewriteEngine On
-RewriteRule ^product/([A-Za-z0-9_-]+)/?$ product.html?id=$1 [L,QSA]
+# ══════════════════════════════════════════════════════════
+# Debasish Das store — Apache + PHP full-stack config
+# Works on InfinityFree, XAMPP (htdocs), cPanel/Apache.
+# Order matters: hard blocks → redirects → dynamic PHP endpoints.
+# ══════════════════════════════════════════════════════════
+# (no Options directive on purpose — some shared hosts 500 on it)
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # ── 1. never serve sensitive paths ──
+  RewriteRule ^(data|server|node_modules|\.git|\.github|deploy)(/|$) - [R=404,L]
+  RewriteRule ^(package(-lock)?\.json|composer(\.json|\.lock)|README\.md|start-windows\.bat)$ - [R=404,L]
+
+  # ── 2. 301: /index[.html] → / ──
+  RewriteRule ^index\.html$ ./ [R=301,L]
+  RewriteRule ^index$ ./ [R=301,L]
+
+  # ── 3. dynamic endpoints ──
+  RewriteCond %{REQUEST_METHOD} ^(GET|HEAD)$
+  RewriteRule ^product/([A-Za-z0-9_-]{1,32})/?$ product.php?id=$1 [L,QSA]
+  RewriteRule ^sitemap\.xml$ api/misc.php?what=sitemap [L,QSA]
+  RewriteRule ^robots\.txt$ api/misc.php?what=robots [L,QSA]
+  RewriteRule ^api(/.*)?$ api/index.php?r=$1 [L,QSA]
+  RewriteRule ^assets/js/([\w.-]+\.js)$ js.php?file=$1 [L,QSA]
+
+  # ── 4. HTML pages (substitution + setup gate) ──
+  RewriteCond %{REQUEST_METHOD} ^(GET|HEAD)$
+  RewriteRule ^([\w.-]+\.html)$ page.php?page=$1 [L,QSA]
+  RewriteCond %{REQUEST_METHOD} ^(GET|HEAD)$
+  RewriteRule ^$ page.php [L,QSA]
+</IfModule>
+
+# ── caching for real static assets ──
+<IfModule mod_headers.c>
+  <FilesMatch "\.(css|js|jpe?g|png|svg|woff2?|ico|gif|webp|avif)$">
+    Header set Cache-Control "public, max-age=3600"
+  </FilesMatch>
+  <FilesMatch "\.html$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>
+
+ErrorDocument 404 /404.html

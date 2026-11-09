@@ -7,13 +7,21 @@ with a **first-run setup wizard** at `/setup.html` (database, brand, seller iden
 admin account, storefront rules, backups) — no file editing required.
 
 ```
-Browser ──► Express (server/server.js) ──► SQLite (data/site.db, auto-created & seeded)
+Browser ──► PHP edition (any Apache + PHP ≥ 7.4, no Node.js) ──► SQLite via PDO
+   or   ──► Node edition (Express, server/server.js)            ──► SQLite (node:sqlite)
               ├─ serves the static site (index.html, login/dashboard/admin)
               └─ /api/* JSON API (auth, products, orders, admin)
 ```
 
-No build step. Two runtime dependencies (`express` only; the DB driver is Node's built-in
-`node:sqlite`). Tested on Node 22+.
+No build step — two editions of the **same store**, sharing the same `data/site.db` file format:
+
+| Edition | Runs on | Requirements |
+| --- | --- | --- |
+| **PHP** (best for shared hosting) | Any Apache + PHP host — XAMPP locally, cPanel/Namecheap/Hostinger, **InfinityFree (free)** | PHP ≥ 7.4 with `pdo_sqlite` (bundled on all of these), `.htaccess` overrides allowed |
+| **Node** | Node ≥ 22.5 — VPS, Railway/Render, your PC | `npm install && npm start` |
+
+Pick one; they are behaviour-compatible (same API contract, same seed data, same backup format —
+a backup downloaded from one restores into the other). **PHP edition** details are in the next section.
 
 ## Quick start
 
@@ -47,6 +55,59 @@ These are shown on the login page (`/login.html`) with one-tap **fill** buttons.
 ADMIN_EMAIL=me@studio.in ADMIN_PASSWORD='a-strong-password' npm start
 ```
 
+## PHP edition — install on any shared host (no Node.js)
+
+The complete store runs on ordinary PHP hosting: setup wizard, accounts, orders
+(stock decrement, server-side coupons, GST-inclusive totals), admin console, reviews,
+GST invoices, reports, backup/restore. PHP serves the same pages, and `/api/*` is routed
+by a root `.htaccess` — there is **no Node process anywhere**.
+
+**How it fits together**
+
+| File / dir | Role |
+| --- | --- |
+| `.htaccess` | Routes `/api/*` → `api/index.php`, `/product/<id>` → `product.php`, `/sitemap.xml` + `/robots.txt` → `api/misc.php`, HTML pages through `page.php` (wizard gate + contact substitution), JS through `js.php`; blocks `/data/`, `server/`, etc. |
+| `api/index.php` | API front controller (all JSON routes; also the boot/seed point) |
+| `api/lib.php`, `api/core.php`, `api/seed.php`, `api/scrypt.php` | DB open/migrate/backup, sessions, bcrypt + legacy-scrypt verify, seed data |
+| `page.php`, `product.php`, `js.php`, `api/misc.php` | HTML/SSR/substitution handlers |
+| `serve.php` | Router for local testing with `php -S` (not used on Apache — `.htaccess` is) |
+| `data/` | SQLite database + uploads — auto-created, web-blocked via `.htaccess` |
+
+### Install (InfinityFree / cPanel / any Apache+PHP)
+
+1. **Upload** the repository into the site root (`htdocs/` on InfinityFree, `public_html/` on cPanel) —
+   *everything except* `node_modules/`, `.git/`, `data/`, `deploy/`, `package*.json`, `start-windows.bat`.
+   Keep the top-level `.htaccess`.
+2. In the control panel, **force HTTPS** and enable free SSL (InfinityFree: Client Area → SSL; cPanel: Let's Encrypt).
+3. Open **`https://your-host/setup.html`** and complete the wizard. That's the install —
+   the `data/` directory and database are created automatically on first request.
+4. **Verify:** `https://your-host/api/products` returns 14 products (fresh demo seed);
+   place a test order; then **Admin → Backup** and download the `.db` — keep it somewhere safe.
+5. **Change the demo passwords** (wizard does this for the admin it creates) and the WhatsApp
+   placeholder `910000000000` in `assets/js/store-core.js` + `assets/js/app.js` before real use.
+
+### XAMPP (Windows) — simplest option
+
+Drop the repo into `C:\xampp\htdocs\mysite`, Apache + PHP run it at
+<http://localhost/mysite/> — wizard at <http://localhost/mysite/setup.html>.
+No Node, no proxy, your other PHP/MySQL apps untouched.
+
+### Honest status — read before you deploy
+
+- The PHP edition passes an **82-check automated end-to-end suite** on PHP 8.3
+  (fresh-install gate, wizard flow, auth incl. legacy password rehash, orders + coupons,
+  admin backup/restore round-trip, SSR pages, throttling, logout). The Node edition passes
+  the same contract; both were exercised against identical demo data.
+- It has **not yet been run on a live InfinityFree/cPanel account**. The remaining risk is
+  host-specific: `.htaccess` overrides must be allowed (`AllowOverride` — ask the host if the
+  site shows Apache’s 403/500 or pages lose their CSS), and the filesystem must be writable
+  for `data/`. If your host forbids `.htaccess` overrides or PDO SQLite, use the Node edition
+  instead — the code is ready for both.
+- Free hosts disclaim durability. **Download the backup after anything important** (Admin → Backup)
+  — you can also restore it (Admin → Restore) onto any other server, either edition.
+- SQLite is ideal for this store’s scale (thousands of orders, one shop). It will not do
+  multi-server replication; no shared host does for you anyway.
+
 ## What's inside
 
 | Page            | Purpose |
@@ -67,7 +128,7 @@ The nav tabs on every page link to these dedicated pages; the home page keeps th
 
 ### Features
 
-- **Real auth** — scrypt-hashed passwords, HttpOnly session cookies (30-day), login throttling (8 tries / 5 min), role-based access (`user` / `admin`)
+- **Real auth** — salted-hash passwords (Node `scrypt`; PHP bcrypt with transparent legacy-scrypt upgrade on first login), HttpOnly session cookies (30-day), login throttling (8 tries / 5 min), role-based access (`user` / `admin`)
 - **Working cart → checkout → order** — server computes totals, delivery fee, stock checks & decrements; free delivery over ₹999 (else ₹49)
 - **Enterprise storefront** — 14-product catalog with reviews, instant search, price buckets, category counts, in-stock filter, popularity/discount/price/rating sort, Today’s Deals rail with live countdown, quick view (qty stepper, share), localStorage wishlist, delivery ETA per card
 - **Reviews & ratings** — seeded reviews per product, average + distribution bars, signed-in customers can write one review per product (server-enforced), verified buyer badges on order-derived stats
@@ -115,7 +176,11 @@ Errors return `{ error: "message" }` with a proper HTTP status. The server never
 index.html                 home (snap sections, cart drawer, checkout + success states)
 services.html / hosting.html / store.html / contact.html   ← tab pages
 login.html / dashboard.html / admin.html
-server/server.js           Express + node:sqlite backend (API + static hosting + seed)
+server/server.js           Node edition — Express + node:sqlite backend (API + static hosting + seed)
+.htaccess                  PHP edition — Apache routing (/api → api/index.php, pages, assets; blocks data/)
+api/                       PHP edition backend — index.php (front controller), lib/core/seed/scrypt (PDO SQLite)
+page.php product.php js.php api/misc.php        PHP edition — page gate, product SSR, JS/misc substitution
+serve.php                  PHP edition — `php -S` local router (mirrors .htaccess)
 assets/css/styles.css      home page theme      assets/css/app.css   login/dashboard/admin theme
 assets/css/pages.css       shared chrome for the 4 tab pages (nav, footer, heroes, cards, FAQ)
 assets/js/app.js           home page logic      assets/js/ui.js      shared helpers (toast/fetch/fmt)
@@ -134,7 +199,7 @@ examples/                  design mockups shown before building
 
 ## ✏️ Personalise before going live
 
-1. `assets/js/app.js` → `SITE` block: `whatsapp` (digits only, country code), `phoneDisplay`, `email`, `location`, `hours` — **and** the matching placeholders `wa.me/910000000000` / `+91 00000 00000` / `hello@example.com` in `index.html`, `dashboard.html`, `server/server.js` (seed phone) and `waDigits` in `assets/js/dashboard.js`.
+1. `assets/js/app.js` → `SITE` block: `whatsapp` (digits only, country code), `phoneDisplay`, `email`, `location`, `hours` — **and** the matching placeholders `wa.me/910000000000` / `+91 00000 00000` / `hello@example.com` in `index.html`, `dashboard.html`, `server/server.js` **and `api/seed.php`** (seed phone) and `waDigits` in `assets/js/dashboard.js`.
 2. `PRODUCTS` in the server is **seed data** (used only to fill an empty DB) — manage live products in **Admin → Products**; storefront rules & coupons in **Admin → Storefront**.
 3. Replace `assets/img/portrait.jpg` with your own photo.
 4. Wordmark is `debasish.` — change it if you use a business brand.
@@ -147,7 +212,8 @@ examples/                  design mockups shown before building
 
 ## Database & live installs
 
-- **Engine:** embedded SQLite via Node's built-in `node:sqlite` — no MySQL/Postgres server to configure. “Connecting a database” = choosing the file (default `data/site.db`, git-ignored). Put it on a mounted volume for VPS/cPanel deploys via the wizard or `DB_PATH`.
+- **Engine:** embedded SQLite — Node edition uses Node's built-in `node:sqlite`; the PHP edition uses PDO SQLite. Same file format, same `data/site.db` (git-ignored), no MySQL/Postgres server to configure. “Connecting a database” = choosing the file (default `data/site.db`). Put it on a mounted volume for VPS/cPanel deploys via the wizard or `DB_PATH` / `DD_DATA_DIR`.
+- **PHP shared hosts:** the app creates `data/` on first request — make sure the folder is writable by PHP (default permissions on InfinityFree/cPanel are fine). `data/.htaccess` is installed automatically so the database is never web-accessible; don't delete it.
 - **Fresh deploy:** everything redirects to `/setup.html` until setup completes. The wizard can (re)install the demo catalogue, wipe to an **empty store** (schema + your admin only), and switch the database file live — sessions for the old file die, the new one is migrated + seeded automatically.
 - **Backups:** Admin → or `/setup.html` → *Download database backup* (consistent `VACUUM INTO` snapshot incl. all orders/customers). *Restore from backup* uploads a `.db` (max 40 MB), validates integrity + schema, keeps a timestamped `.bak-*` safety copy next to the live file, and rolls back automatically if validation fails.
 - **Non-destructive checks:** “Test connection” opens/creates the target, runs `PRAGMA integrity_check` and reports table counts — without seeding anything (a brand-new file is removed after the test).
@@ -155,14 +221,21 @@ examples/                  design mockups shown before building
 
 ## Setup page troubleshooting
 
-If `/setup.html` says **“Setup unavailable — the setup API answered 404”**, the page is being served without the Node backend. Fix, in order: **(1)** pull the latest code and **restart the Node app** (routes are cached at boot — cPanel/Passenger: press Restart); **(2)** run it with `npm start` on Node ≥ 22.5 — GitHub Pages/Netlify/`python -m http.server` can display the page but cannot run the installer; **(3)** re-upload the whole repo so `setup.html` and `server/server.js` match; **(4)** behind a proxy/subpath, forward `/api/*` untouched, or open `/setup.html?api=/your/subpath/api`.
+If `/setup.html` says **“Setup unavailable — the setup API answered 404”**, the page is being served without a backend. Fix, in order:
+
+- **PHP edition:** **(1)** re-upload the *whole* repo including `.htaccess` and `api/`; **(2)** check the host allows `.htaccess` overrides (`AllowOverride` — if your pages appear but `/api/*` 404s or 500s, it doesn't; enable it or ask the host); **(3)** open `/setup.html?api=/your/subpath/api` only if you installed into a subdirectory that rewrites differently; **(4)** confirm PDO SQLite with `https://host/api/products` — a JSON list means the stack works.
+- **Node edition:** **(1)** pull the latest code and **restart the Node app** (routes are cached at boot — cPanel/Passenger: press Restart); **(2)** run it with `npm start` on Node ≥ 22.5 — GitHub Pages/Netlify/`python -m http.server` can display the page but cannot run the installer; **(3)** re-upload the whole repo so `setup.html` and `server/server.js` match; **(4)** behind a proxy/subpath, forward `/api/*` untouched, or open `/setup.html?api=/your/subpath/api`.
 
 ## Running on Windows + XAMPP
 
-XAMPP ships **Apache + PHP + MySQL — not Node.js**. Dropping this repo into `xampp/htdocs` shows the pages through Apache, but `/api/*` (login, orders, the store, `/setup.html`) can never work — that's the “Setup unavailable · 404” you saw. Run the app **next to** XAMPP instead; your PHP/MySQL apps stay untouched.
+XAMPP ships **Apache + PHP + MySQL — not Node.js**. You now have two ways to run the store there:
 
-1. **Install Node.js (required):** <https://nodejs.org> → LTS (v22.5+), default options. Verify in cmd: `node -v`.
-2. **Put the repo anywhere on disk** — e.g. `C:\sites\mysite`. Do **not** use `C:\xampp\htdocs` for this app.
+**Option A — PHP edition (recommended now):** copy the repo into `C:\xampp\htdocs\mysite` and open <http://localhost/mysite/>. Apache + PHP serve everything, wizard at <http://localhost/mysite/setup.html>. No Node at all.
+
+**Option B — Node edition next to XAMPP:** run the app **next to** XAMPP (Node serves it, XAMPP serves your PHP sites). The steps below are for option B.
+
+1. **Install Node.js (required for option B):** <https://nodejs.org> → LTS (v22.5+), default options. Verify in cmd: `node -v`.
+2. **Put the repo anywhere on disk** — e.g. `C:\sites\mysite`. Do **not** use `C:\xampp\htdocs` for option B (use it for option A).
 3. **Double-click `start-windows.bat`** (checks Node, installs deps on first run, starts the site) — or manually: `cd C:\sites\mysite` → `npm install` → `npm start`.
    - **PowerShell blocks `npm install` with “running scripts is disabled”?** That's PowerShell's `ExecutionPolicy`, not Node. Either use **Command Prompt** (Win+R → `cmd` → Enter — `npm` is `npm.cmd` there and works), double-click the `.bat`, run `npm.cmd install` explicitly, or allow locally-run scripts for yourself once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 4. Open **<http://localhost:8000>**. Fresh install → the setup wizard. Data lives in `data\site.db` (git-ignored) — back it up from `/setup.html` any time.
@@ -173,45 +246,49 @@ XAMPP ships **Apache + PHP + MySQL — not Node.js**. Dropping this repo into `x
    - Alternative without touching Apache: **Cloudflare Tunnel** (`cloudflared tunnel --url http://localhost:8000`) gives you an HTTPS URL.
    - Already serving `http://localhost/mysite/` from htdocs and want to keep it? Proxy **only the API**: `ProxyPass /mysite/api/ http://127.0.0.1:8000/api/` (+ `ProxyPassReverse`) — see `deploy/xampp-apache.conf`, Scenario 4. The static pages then work exactly as they do today, with the Node backend behind them.
 7. **About MySQL/MariaDB in XAMPP:** this app uses its own embedded **SQLite** file — it does not use XAMPP’s MySQL, so you don't need to create a database or user for it. Your MySQL stays free for your other apps. (If you specifically require MySQL as the store backend, that's a data-layer migration — ask and I'll scope it.)
-8. **The wizard on XAMPP:** Node serves everything, so `/setup.html` + `/api/setup/*` work normally at <http://localhost:8000/setup.html>. If your domain proxies to Node (step 6), the wizard is at `https://yourdomain/setup.html`.
+8. **The wizard on XAMPP:** Node serves everything, so `/setup.html` + `/api/setup/*` work normally at <http://localhost:8000/setup.html>. If your domain proxies to Node (step 6), the wizard is at `https://yourdomain/setup.html`. (With option A — the PHP edition — the wizard is at `http://localhost/mysite/setup.html` and these proxy steps don't apply.)
 
 ## Local preview of the static-only variant
 
-The site also works without the backend for design previews and simple storefront duty: products fall back to the built-in catalogue, the cart persists in the browser, and a visitor's "Confirm & Place Order" composes a WhatsApp message with the full basket instead of hitting the API. Serve it with any static server, e.g. `python3 -m http.server 8000` — but accounts, orders, admin and the coupon/GST pipeline need `npm start`.
+The site also works without the backend for design previews and simple storefront duty: products fall back to the built-in catalogue, the cart persists in the browser, and a visitor's "Confirm & Place Order" composes a WhatsApp message with the full basket instead of hitting the API. Serve it with any static server, e.g. `python3 -m http.server 8000` — but accounts, orders, admin and the coupon/GST pipeline need a backend (the PHP edition above, or `npm start`).
 
 ## Deploy
 
-This is a **Node app**, not a static bundle. Any host that runs Node 22.5+ works:
+This is **a full-stack app in two editions**, not a static bundle:
 
-- **VPS / cPanel (Node.js App) / Railway / Render / Fly** — `npm install && npm start`, set `PORT`, persist the `data/` folder (or point `DB_PATH` at a volume).
-- **Namecheap/Hostinger cPanel**: create a Node.js app, run it from the repo root, env `PORT` is assigned by cPanel; make sure the app root contains `index.html` + `assets/`.
-- Static-only hosts (GitHub Pages/Netlify drop-in) can still host the design pages — see the note below.
+- **Any Apache + PHP host (InfinityFree free, cPanel, Namecheap, Hostinger)** — upload the repo, open `/setup.html`. See **PHP edition** above. No Node required.
+- **Node 22.5+ hosts** — VPS / cPanel “Node.js App” / Railway / Render / Fly: `npm install && npm start`, set `PORT`, persist the `data/` folder (or point `DB_PATH` at a volume).
+- **Namecheap/Hostinger cPanel (Node)**: create a Node.js app, run it from the repo root, env `PORT` is assigned by cPanel; make sure the app root contains `index.html` + `assets/`.
+- Static-only hosts (GitHub Pages/Netlify drop-in) can still host the design pages — see the note below (WhatsApp checkout, no accounts).
 
-## Publish on InfinityFree (static storefront)
+## Publish on InfinityFree — the **full** store, free
 
-InfinityFree is **PHP + MySQL only — no Node.js on the free plan** (its premium plans advertise Node, and the free tier's MySQL is of no use to this app; data lives in SQLite). You can absolutely publish the **storefront** there — it degrades gracefully:
-
-| Works on InfinityFree | Does **not** work (no Node) |
-| --- | --- |
-| All design pages, catalogue (falls back to the built-in list of 14 products) | Login / signup / accounts / order history |
-| Product pages (`https://you.epizy.com/product/p1` via `.htaccess`, or `product.html?id=p1`) | Admin console, setup wizard, dashboards, invoices |
-| Cart + wishlist (saved in the visitor's browser) | Applying **coupons through the server** — offline seed codes `WELCOME10`, `FLAT100`, `SHELF150` are validated locally |
-| **Checkout → opens WhatsApp with the full order pre-filled** — cash on delivery / UPI, no account needed | Order numbers, GST invoices, stock counts, server-side analytics |
+InfinityFree is **PHP + MySQL only — no Node.js on the free plan**, and the PHP edition of this store needs neither Node nor MySQL: it uses **PDO SQLite**, which the InfinityFree team confirms is available on all plans. So the whole thing — accounts, orders, admin, invoices — runs there.
 
 Steps:
 
-1. Fix the WhatsApp number first: `SITE.whatsapp` in `assets/js/store-core.js` is a `910000000000` placeholder — change it to your number in international format (digits only) or orders will reach a stranger. (`assets/js/app.js` has its own copy if you edit the site-wide badge.)
-2. Create a free account at <https://www.infinityfree.net> → **Create Website** → pick a free subdomain (e.g. `yourname.epizy.com`) or connect a domain you own.
-3. Get FTP credentials from the control panel (**Accounts → FTP**) and connect with [FileZilla](https://filezilla-project.org).
-4. Upload **only these** to `htdocs/`: the top-level `*.html` files, `assets/`, `.htaccess`. Do **not** upload `server/`, `node_modules/`, `data/`, `.git/`, `deploy/`, `start-windows.bat`, `package*.json` — they are useless or sensitive on a static host.
-5. In the control panel, enable the free **Let's Encrypt SSL**, force HTTPS, and you're live at `https://yourname.epizy.com/`.
-6. Test: open the site, add to cart, Apply coupon `WELCOME10`, Confirm & Place Order → WhatsApp should open with the basket pre-filled.
+1. Create a free account at <https://www.infinityfree.net> → **Create Website** → pick a free subdomain (e.g. `yourname.epizy.com`) or connect a domain you own.
+2. Get FTP credentials (**Accounts → FTP**) and connect with [FileZilla](https://filezilla-project.org).
+3. Upload the repo into `htdocs/`: the top-level `*.html`, `*.php`, `.htaccess`, `assets/`, `api/`. Do **not** upload `node_modules/`, `.git/`, `data/`, `deploy/`, `package*.json`, `start-windows.bat`.
+4. Enable the free **Let's Encrypt SSL** and force HTTPS.
+5. Open `https://yourname.epizy.com/setup.html` and complete the wizard.
+6. Verify: `https://yourname.epizy.com/api/products` → 14 products; place a test order from a second browser; sign in as admin and **download a backup** (Admin → Backup).
+7. Fix the WhatsApp placeholder `910000000000` (`assets/js/store-core.js`, `assets/js/app.js`) before real customers use it.
 
-InfinityFree is fine as a brochure + WhatsApp-ordering storefront — **not** as the full store (inventory, real orders, admin). For the whole thing live, in order of cost:
+If it misbehaves (pages unstyled, 403/500, `/api/*` 404s), the host is ignoring `.htaccess` or PDO SQLite — ask the host, or use the Node edition instead (see below). You can also verify quickly whether PDO SQLite works there by opening `https://yourname.epizy.com/api/products` — a JSON list means yes; an error page means no.
 
-1. **Cloudflare Tunnel** (free, keeps everything): run the full app on the XAMPP machine per the section above, then `cloudflared tunnel --url http://localhost:8000` — you get an HTTPS URL on your domain, no port-forwarding. The PC must stay on with `npm start` running.
-2. **A small VPS** (~₹350–₹700/month) — Hostinger/Contabo/DigitalOcean: install Node ≥ 22.5, `npm install`, `npm start`, put nginx or cPanel in front, done. This is the only option that gives the *full* app with admin/accounts reliably, 24/7.
-3. **Node-capable PaaS free tiers** (Render, Koyeb) — run it, but the filesystem is ephemeral: `data/site.db` is wiped on redeploys/restarts, so orders and any edits vanish. Not usable for a real store.
-4. **Full PHP port** (WordPress/WooCommerce) — a rewrite, not a port; out of scope here.
+**Reliability honesty checklist for free hosting:**
 
-Health check: `GET /api/products` should return 14 seeded products on a fresh deploy. Demo coupons: `WELCOME10` (10% off), `FLAT100` (₹100 off ₹999+), `SHELF150` (₹150 off ₹1499+, 100 uses).
+- Free hosting gives no durability guarantee — **download a backup after any real order** and keep it outside the host. Restore works onto any other server (either edition).
+- If `data/` ever becomes unreadable, orders are lost — the backup is the only copy.
+- Expect slow cold starts and occasional maintenance downtime; not for high volume. For a growing store, move to a small VPS (₹350–₹700/month) with the Node edition, or a paid PHP plan — both run this exact code unchanged.
+
+### The static-only fallback (if you can't use PHP either)
+
+The site also degrades gracefully to a pure static storefront — design pages, catalogue
+(browser-fallback list of 14 products), cart/wishlist in the browser, and checkout that
+composes a WhatsApp message instead of an API order. Upload only the `*.html` + `assets/`
+(no PHP files). Accounts, admin, server-side coupons, order numbers and invoices **will not work**.
+This exists for brochure-quality embeds — prefer the PHP edition for a real shop.
+
+Health check (both editions): `GET /api/products` should return 14 seeded products on a fresh deploy. Demo coupons: `WELCOME10` (10% off), `FLAT100` (₹100 off ₹999+), `SHELF150` (₹150 off ₹1499+, 100 uses).
