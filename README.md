@@ -157,6 +157,22 @@ examples/                  design mockups shown before building
 
 If `/setup.html` says **“Setup unavailable — the setup API answered 404”**, the page is being served without the Node backend. Fix, in order: **(1)** pull the latest code and **restart the Node app** (routes are cached at boot — cPanel/Passenger: press Restart); **(2)** run it with `npm start` on Node ≥ 22.5 — GitHub Pages/Netlify/`python -m http.server` can display the page but cannot run the installer; **(3)** re-upload the whole repo so `setup.html` and `server/server.js` match; **(4)** behind a proxy/subpath, forward `/api/*` untouched, or open `/setup.html?api=/your/subpath/api`.
 
+## Running on Windows + XAMPP
+
+XAMPP ships **Apache + PHP + MySQL — not Node.js**. Dropping this repo into `xampp/htdocs` shows the pages through Apache, but `/api/*` (login, orders, the store, `/setup.html`) can never work — that's the “Setup unavailable · 404” you saw. Run the app **next to** XAMPP instead; your PHP/MySQL apps stay untouched.
+
+1. **Install Node.js (required):** <https://nodejs.org> → LTS (v22.5+), default options. Verify in cmd: `node -v`.
+2. **Put the repo anywhere on disk** — e.g. `C:\sites\mysite`. Do **not** use `C:\xampp\htdocs` for this app.
+3. **Double-click `start-windows.bat`** (checks Node, installs deps on first run, starts the site) — or manually: `cd C:\sites\mysite` → `npm install` → `npm start`.
+4. Open **<http://localhost:8000>**. Fresh install → the setup wizard. Data lives in `data\site.db` (git-ignored) — back it up from `/setup.html` any time.
+5. **Keep it running:** leave the launcher window open, or add `npm start` in that folder to Task Scheduler → *At startup*. For a proper service use [pm2](https://pm2.keymetrics.io): `npm i -g pm2` → `pm2 start npm --name mysite -- start`.
+6. **Reaching it from other devices / the internet:**
+   - LAN: `http://<server-IP>:8000` — allow inbound TCP 8000 in Windows Firewall.
+   - Public: reverse-proxy Apache → Node so your domain serves it — see `deploy/xampp-apache.conf` (whole-domain `<VirtualHost>`, or a `/mysite/` subpath with `https://yourdomain/mysite/setup.html?api=/mysite/api`). Uncomment `mod_proxy` / `mod_proxy_http` / `mod_headers` in `httpd.conf`, keep XAMPP Apache on port 80, Node on 8000.
+   - Alternative without touching Apache: **Cloudflare Tunnel** (`cloudflared tunnel --url http://localhost:8000`) gives you an HTTPS URL.
+7. **About MySQL/MariaDB in XAMPP:** this app uses its own embedded **SQLite** file — it does not use XAMPP’s MySQL, so you don't need to create a database or user for it. Your MySQL stays free for your other apps. (If you specifically require MySQL as the store backend, that's a data-layer migration — ask and I'll scope it.)
+8. **The wizard on XAMPP:** Node serves everything, so `/setup.html` + `/api/setup/*` work normally at <http://localhost:8000/setup.html>. If your domain proxies to Node (step 6), the wizard is at `https://yourdomain/setup.html`.
+
 ## Local preview of the static-only variant
 
 The `index.html` still works without the backend for design previews (products fall back
