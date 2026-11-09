@@ -218,7 +218,7 @@
   $("#qvBuy").addEventListener("click", () => { if (qvId) { if (window.DD.cart.add(qvId, qvQty)) { closeQuickView(); window.DD.cart.open(); } } });
   $("#qvShare").addEventListener("click", async () => {
     if (!qvId) return;
-    const url = location.origin + "/product/" + qvId;
+    const url = location.origin + "__BASE_PATH__" + "/product/" + qvId;
     try { await navigator.clipboard.writeText(url); toast("Product link copied ✓"); }
     catch { toast("Couldn't copy — long-press to share"); }
   });

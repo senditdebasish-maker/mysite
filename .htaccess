@@ -12,9 +12,9 @@
   RewriteRule ^(data|\.git|\.github)(/|$) - [R=404,L]
   RewriteRule ^(composer(\.json|\.lock)|README\.md)$ - [R=404,L]
 
-  # ── 2. 301: /index[.html] → / ──
-  RewriteRule ^index\.html$ ./ [R=301,L]
-  RewriteRule ^index$ ./ [R=301,L]
+  # ── 2. /index[.html] → same page handler (no external redirect: an explicit
+  #       ./ substitution leaks the filesystem path on Windows/XAMPP subfolders) ──
+  RewriteRule ^index/?$ page.php?page=index.html [L,QSA]
 
   # ── 3. dynamic endpoints ──
   RewriteCond %{REQUEST_METHOD} ^(GET|HEAD)$

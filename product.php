@@ -11,7 +11,7 @@ function dd_render_product(string $id, array $req): array {
   dd_boot_seed(); // idempotent: seeds demo catalogue on a brand-new DB
   // fresh installs: product pages hold at the wizard too
   if (!dd_is_setup_complete()) {
-    return ['status' => 302, 'headers' => ['Location' => '/setup.html'], 'body' => '', 'content_type' => 'text/plain; charset=utf-8'];
+    return ['status' => 302, 'headers' => ['Location' => dd_base_path() . '/setup.html'], 'body' => '', 'content_type' => 'text/plain; charset=utf-8'];
   }
   if (!preg_match('/^[A-Za-z0-9_-]{1,32}$/', $id)) return dd_page_404();
   $stmt = dd_db()->prepare('SELECT * FROM products WHERE id = ? AND active = 1');

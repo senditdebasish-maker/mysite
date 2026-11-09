@@ -248,9 +248,9 @@
     empty.hidden = items.length !== 0;
     grid.innerHTML = items.map(p => `
       <article class="wish-card">
-        <a href="/product/${esc(p.id)}" aria-label="View ${esc(p.name)}"><img src="${esc(p.img)}" alt="${esc(p.name)}" loading="lazy" width="300" height="300" /></a>
+        <a href="__BASE_PATH__/product/${esc(p.id)}" aria-label="View ${esc(p.name)}"><img src="${esc(p.img)}" alt="${esc(p.name)}" loading="lazy" width="300" height="300" /></a>
         <div class="wish-body">
-          <a class="wish-name" href="/product/${esc(p.id)}" style="text-decoration:none">${esc(p.name)}</a>
+          <a class="wish-name" href="__BASE_PATH__/product/${esc(p.id)}" style="text-decoration:none">${esc(p.name)}</a>
           <span class="wish-price">${inr(p.price)}</span>
           <div class="wish-actions">
             <button class="btn btn-ink btn-sm" data-wish-add="${esc(p.id)}" type="button">Add to cart</button>

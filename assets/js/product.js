@@ -13,7 +13,8 @@
   let qty = 1;
 
   const money = fmtINR;
-  const shareUrl = () => location.origin + "/product/" + pid;
+  const BASE_PATH = "__BASE_PATH__";
+  const shareUrl = () => location.origin + BASE_PATH + "/product/" + pid;
 
   function wireShare() {
     const url = shareUrl();

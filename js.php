@@ -9,8 +9,9 @@ function dd_render_js(string $file): array {
   $full = DD_ROOT . '/assets/js/' . $file;
   if (!is_file($full)) return ['status' => 404, 'headers' => [], 'body' => 'Not found', 'content_type' => 'text/plain; charset=utf-8'];
   $src = (string) file_get_contents($full);
+  $body = dd_contact_substitutions(str_replace('__BASE_PATH__', dd_base_path(), $src));
   return ['status' => 200, 'headers' => ['Cache-Control' => 'no-cache'],
-          'body' => dd_contact_substitutions($src), 'content_type' => 'application/javascript; charset=utf-8'];
+          'body' => $body, 'content_type' => 'application/javascript; charset=utf-8'];
 }
 
 function dd_js_main(): void {

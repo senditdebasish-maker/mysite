@@ -15,8 +15,8 @@ if (preg_match('#^/(data|\.git|\.github)(/|$)#i', $uri)
   readfile(__DIR__ . '/404.html');
   return true;
 }
-// index redirect
-if ($uri === '/index.html' || $uri === '/index') { header('Location: /', true, 301); return true; }
+// /index.html and /index → the same page handler (no external redirect)
+if ($uri === '/index.html' || $uri === '/index') { $_GET['page'] = 'index.html'; require __DIR__ . '/page.php'; dd_page_main(); return true; }
 // API
 if (preg_match('#^/api(/.*)?$#', $uri, $m)) {
   $_SERVER['PATH_INFO'] = ($m[1] ?? '') !== '' ? $m[1] : '/';

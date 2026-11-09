@@ -263,10 +263,34 @@ function dd_contact_substitutions(string $text): string {
   if ($sp !== '') $out = str_replace('+91 00000 00000', $sp, $out);
   return $out;
 }
+/**
+ * Path prefix the site is mounted under — '' when served from the vhost docroot,
+ * '/mysite' when served from htdocs/mysite (XAMPP subfolder installs).
+ * Env DD_BASE_PATH overrides detection (proxies, symlinked docroots).
+ */
+function dd_base_path(): string {
+  static $p = null;
+  if ($p !== null) return $p;
+  $env = getenv('DD_BASE_PATH');
+  if ($env !== false) return $p = rtrim(str_replace('\\', '/', trim((string) $env)), '/');
+  $docroot = $_SERVER['DOCUMENT_ROOT'] ?? '';
+  $dr = $docroot !== '' ? realpath((string) $docroot) : false;
+  $rr = realpath(DD_ROOT);
+  $norm = static fn($s) => rtrim(str_replace('\\', '/', (string) $s), '/');
+  if ($dr !== false && $rr !== false) {
+    $drN = $norm($dr); $rrN = $norm($rr);
+    if ($rrN === $drN) return $p = '';                                        // repo IS the docroot
+    if (strncmp($rrN, $drN . '/', strlen($drN) + 1) === 0) {
+      return $p = $norm(substr($rrN, strlen($drN)));                          // repo nested inside docroot
+    }
+  }
+  return $p = '';                                                             // CLI/tests: root-mounted
+}
+
 function dd_base_url(array $req): string {
   $https = $req['https'] ?? false;
   $host = $req['headers']['host'] ?? 'localhost';
-  return ($https ? 'https' : 'http') . '://' . $host;
+  return ($https ? 'https' : 'http') . '://' . $host . dd_base_path();
 }
 
 /* 404 page (shared by page/product handlers) */

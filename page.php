@@ -25,13 +25,14 @@ function dd_render_page(string $page, array $req): array {
 
   // fresh installs hold every page at the wizard (API/assets stay open)
   if (!dd_is_setup_complete() && !$isSetupPage) {
-    return ['status' => 302, 'headers' => ['Location' => '/setup.html'], 'body' => '', 'content_type' => 'text/plain; charset=utf-8'];
+    return ['status' => 302, 'headers' => ['Location' => dd_base_path() . '/setup.html'], 'body' => '', 'content_type' => 'text/plain; charset=utf-8'];
   }
   // the wizard itself is admin-only once setup is done
   if ($isSetupPage && dd_is_setup_complete()) {
     $u = dd_current_user($req);
     if (!$u || ($u['role'] ?? '') !== 'admin') {
-      return ['status' => 302, 'headers' => ['Location' => '/login.html?next=/setup.html'], 'body' => '', 'content_type' => 'text/plain; charset=utf-8'];
+      $bp = dd_base_path();
+      return ['status' => 302, 'headers' => ['Location' => $bp . '/login.html?next=' . $bp . '/setup.html'], 'body' => '', 'content_type' => 'text/plain; charset=utf-8'];
     }
   }
 
