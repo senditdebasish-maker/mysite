@@ -164,6 +164,7 @@ XAMPP ships **Apache + PHP + MySQL — not Node.js**. Dropping this repo into `x
 1. **Install Node.js (required):** <https://nodejs.org> → LTS (v22.5+), default options. Verify in cmd: `node -v`.
 2. **Put the repo anywhere on disk** — e.g. `C:\sites\mysite`. Do **not** use `C:\xampp\htdocs` for this app.
 3. **Double-click `start-windows.bat`** (checks Node, installs deps on first run, starts the site) — or manually: `cd C:\sites\mysite` → `npm install` → `npm start`.
+   - **PowerShell blocks `npm install` with “running scripts is disabled”?** That's PowerShell's `ExecutionPolicy`, not Node. Either use **Command Prompt** (Win+R → `cmd` → Enter — `npm` is `npm.cmd` there and works), double-click the `.bat`, run `npm.cmd install` explicitly, or allow locally-run scripts for yourself once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 4. Open **<http://localhost:8000>**. Fresh install → the setup wizard. Data lives in `data\site.db` (git-ignored) — back it up from `/setup.html` any time.
 5. **Keep it running:** leave the launcher window open, or add `npm start` in that folder to Task Scheduler → *At startup*. For a proper service use [pm2](https://pm2.keymetrics.io): `npm i -g pm2` → `pm2 start npm --name mysite -- start`.
 6. **Reaching it from other devices / the internet:**
