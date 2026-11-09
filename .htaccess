@@ -21,6 +21,10 @@
   RewriteRule ^product/([A-Za-z0-9_-]{1,32})/?$ product.php?id=$1 [L,QSA]
   RewriteRule ^sitemap\.xml$ api/misc.php?what=sitemap [L,QSA]
   RewriteRule ^robots\.txt$ api/misc.php?what=robots [L,QSA]
+  # api/index.php itself matches ^api(...) — without the !-f guard Apache re-applies
+  # the rule to the rewritten URL forever (internal-redirect loop → 500 on every /api call)
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^api(/.*)?$ api/index.php?r=$1 [L,QSA]
   RewriteRule ^assets/js/([\w.-]+\.js)$ js.php?file=$1 [L,QSA]
 

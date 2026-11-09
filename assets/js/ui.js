@@ -16,7 +16,21 @@ window.UI = (function () {
   }
 
   async function fetchJSON(url, opts = {}) {
-    const res = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
+    // hard timeout — never leave the UI stuck on "Signing in…" when the server stalls
+    const signal = opts.signal || (window.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined);
+    let res;
+    try {
+      res = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json" }, signal }, opts));
+    } catch (err) {
+      if (err && (err.name === "AbortError" || err.name === "TimeoutError")) {
+        const e = new Error("The server didn't respond (20s). Is the backend reachable? See README → Setup page troubleshooting.");
+        e.status = 0;
+        throw e;
+      }
+      const e = new Error("Couldn't reach the server — check that the backend is running and /api/* is routed (README → Setup page troubleshooting).");
+      e.status = 0;
+      throw e;
+    }
     let data = {};
     try { data = await res.json(); } catch { /* non-JSON */ }
     if (!res.ok) {
