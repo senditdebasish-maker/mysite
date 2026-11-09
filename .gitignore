@@ -6,3 +6,4 @@ data/install.json
 data/*.bak-*
 data/*.restore-tmp
 *.jar
+data/.throttle.json
