@@ -21,12 +21,11 @@ function dd_site_settings(): array {
 }
 function dd_seller_info(): array {
   return [
-    'name'  => dd_site_get('site_brand')   ?: 'Debasish Das — Web Studio & Store',
-    'line'  => dd_site_get('site_tagline') ?: (getenv('SELLER_LINE')  ?: 'Web design · Hosting · Handpicked store'),
-    'addr'  => dd_site_get('site_address') ?: (getenv('SELLER_ADDR')  ?: 'Kolkata, West Bengal 700001, India'),
-    'gstin' => dd_site_get('site_gstin')   ?: (getenv('SELLER_GSTIN') ?: '19ABCDE1234F1Z5 (sample)'),
-    'email' => dd_site_get('site_email')   ?: (getenv('SELLER_EMAIL') ?: 'hello@example.com'),
-    'phone' => dd_site_get('site_phone')   ?: (getenv('SELLER_PHONE') ?: '+91 00000 00000'),
+    'name'  => dd_site_get('site_brand') ?: 'Store',
+    'line'  => dd_site_get('site_tagline'),
+    'addr'  => dd_site_get('site_address'),
+    'email' => dd_site_get('site_email'),
+    'phone' => dd_site_get('site_phone'),
   ];
 }
 
@@ -53,14 +52,16 @@ function dd_store_config(): array {
   ];
 }
 function dd_is_setup_complete(): bool {
-  try { return dd_get_setting('setup_completed') === '1'; } catch (Throwable $e) { return false; }
+  try { return dd_get_setting('setup_completed') === '1'; } catch (DdHttpError $e) { return false; }
 }
 function dd_product_out(array $p): array {
   return [
-    'id' => $p['id'], 'name' => $p['name'], 'meta' => $p['meta'], 'tag' => $p['tag'],
+    'id' => $p['id'], 'category_id' => isset($p['category_id']) ? (int) $p['category_id'] : null,
+    'name' => $p['name'], 'meta' => $p['meta'], 'tag' => $p['category_name'] ?? $p['tag'],
     'price' => (int) $p['price'], 'was' => (int) $p['was'], 'rating' => (float) $p['rating'],
     'stock' => (int) $p['stock'], 'img' => $p['img'],
     'reviews' => (int) ($p['reviews'] ?? 0), 'active' => (bool) $p['active'],
+    'created_at' => $p['created_at'] ?? null,
   ];
 }
 function dd_parse_items(?string $s): array {
@@ -78,55 +79,20 @@ function dd_db_counts(): array {
     'inquiries' => $q('SELECT COUNT(*) n FROM inquiries'),
   ];
 }
-function dd_db_info(): array {
-  $path = dd_db_path();
-  $size = @filesize($path);
-  $env  = dd_env_db_path();
-  return [
-    'engine'      => 'SQLite (PHP PDO — any Apache+PHP host)',
-    'path'        => $path,
-    'defaultPath' => DD_DATA . '/site.db',
-    'envLocked'   => $env !== null,
-    'size'        => $size === false ? null : $size,
-    'counts'      => dd_db_counts(),
-  ];
-}
 function dd_require_setup_open(?array $user): void {
-  if (!dd_is_setup_complete()) return;
+  $complete = dd_is_setup_complete();
+  if (!$complete && !isset(dd_read_install()['database'])) return;
+  $adminCount = (int) dd_db()->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn();
+  if ($adminCount === 0 && !$complete) return;
   if ($user && ($user['role'] ?? '') === 'admin') return;
-  throw new DdHttpError(403, 'Setup is already complete — sign in as admin to change these settings.');
+  throw new DdHttpError(403, 'Sign in as admin to change these settings.');
 }
-const DD_WIPE_TABLES = ['reviews', 'orders', 'sessions', 'coupons', 'inquiries', 'products', 'users', 'store_settings'];
-function dd_wipe_all_tables(): void {
-  $db = dd_db();
-  $db->exec('PRAGMA foreign_keys = OFF');
-  foreach (DD_WIPE_TABLES as $t) $db->exec("DELETE FROM $t");
-  $db->exec('PRAGMA foreign_keys = ON');
-  try { $db->exec('VACUUM'); } catch (Throwable $e) {}
-}
-
-/* ════════════════ passwords ════════════════
-   Stored format: 16 random bytes as a 32-char hex STRING used as the scrypt
-   salt (N=16384, r=8, p=1, 64-byte key), 128-hex output. Older databases that
-   were hashed with bcrypt are still accepted via password_verify. */
-function dd_new_salt(): string { return bin2hex(random_bytes(16)); }
-function dd_scrypt_hex(string $pw, string $saltStr): string {
-  require_once __DIR__ . '/scrypt.php';
-  return bin2hex(scrypt_hash($pw, $saltStr, 16384, 8, 1, 64));
-}
+/* ════════════════ passwords ════════════════ */
 function dd_password_pair(string $pw): array {
-  $salt = dd_new_salt();
-  return ['hash' => dd_scrypt_hex($pw, $salt), 'salt' => $salt];
+  return ['hash' => password_hash($pw, PASSWORD_DEFAULT), 'salt' => 'bcrypt'];
 }
 function dd_verify_password(string $pw, array $u): bool {
-  $hash = (string) ($u['password_hash'] ?? '');
-  $salt = (string) ($u['password_salt'] ?? '');
-  if ($salt === 'bcrypt') return password_verify($pw, $hash);
-  if ($salt !== '' && strlen($hash) === 128) {
-    require_once __DIR__ . '/scrypt.php';
-    return scrypt_verify_password($pw, $salt, $hash);
-  }
-  return false;
+  return password_verify($pw, (string) ($u['password_hash'] ?? ''));
 }
 
 /* ════════════════ sessions ════════════════ */
@@ -144,7 +110,7 @@ function dd_parse_cookies(?string $header): array {
 }
 function dd_user_public(?array $u): ?array {
   if (!$u) return null;
-  return ['id' => (int) $u['id'], 'name' => $u['name'], 'email' => $u['email'],
+  return ['id' => (int) $u['id'], 'name' => $u['name'], 'username' => $u['username'] ?? '', 'email' => $u['email'],
           'phone' => $u['phone'], 'role' => $u['role'], 'created_at' => $u['created_at']];
 }
 function dd_current_user(array $req): ?array {
@@ -152,7 +118,7 @@ function dd_current_user(array $req): ?array {
   $sid = $cookies['dd_sid'] ?? null;
   if (!$sid) return null;
   $stmt = dd_db()->prepare("SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
-                            WHERE s.token = ? AND s.expires_at > datetime('now')");
+                            WHERE s.token = ? AND s.expires_at > UTC_TIMESTAMP()");
   $stmt->execute([$sid]);
   $row = $stmt->fetch();
   return $row ?: null;
@@ -167,16 +133,18 @@ function dd_cookie_out(string $cookie): void {
 function dd_create_session(array &$req, int $userId): array {
   $token = bin2hex(random_bytes(32));
   $days = dd_session_days();
-  $stmt = dd_db()->prepare("INSERT INTO sessions (token,user_id,expires_at) VALUES (?,?,datetime('now', ?))");
-  $stmt->execute([$token, $userId, '+' . $days . ' days']);
-  dd_cookie_out("dd_sid=$token; HttpOnly; SameSite=Lax; Path=/; Max-Age=" . ($days * 86400));
+  $stmt = dd_db()->prepare("INSERT INTO sessions (token,user_id,expires_at) VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL {$days} DAY))");
+  $stmt->execute([$token, $userId]);
+  $secure = !empty($req['https']) ? '; Secure' : '';
+  dd_cookie_out("dd_sid=$token; HttpOnly; SameSite=Lax; Path=" . (dd_base_path() ?: '/') . "; Max-Age=" . ($days * 86400) . $secure);
   return [$token];
 }
 function dd_destroy_session(array &$req): void {
   $cookies = dd_parse_cookies($req['headers']['cookie'] ?? null);
   $sid = $cookies['dd_sid'] ?? null;
   if ($sid) dd_db()->prepare("DELETE FROM sessions WHERE token = ?")->execute([$sid]);
-  dd_cookie_out("dd_sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+  $secure = !empty($req['https']) ? '; Secure' : '';
+  dd_cookie_out("dd_sid=; HttpOnly; SameSite=Lax; Path=" . (dd_base_path() ?: '/') . "; Max-Age=0" . $secure);
 }
 function dd_require_auth(array $req): array {
   $u = dd_current_user($req);
@@ -191,57 +159,84 @@ function dd_require_admin(array $req): array {
 
 /* ════════════════ login throttle (file-based) ════════════════ */
 function dd_throttle_file(): string { return DD_DATA . '/.throttle.json'; }
-function dd_throttle_read(): array {
-  $f = dd_throttle_file();
-  if (!is_file($f)) return [];
-  $j = json_decode((string) @file_get_contents($f), true);
-  return is_array($j) ? $j : [];
-}
-function dd_throttle_write(array $data): void {
-  $f = dd_throttle_file();
-  $fp = fopen($f, 'c+');
-  if (!$fp) return;
-  flock($fp, LOCK_EX);
-  ftruncate($fp, 0);
-  rewind($fp);
-  fwrite($fp, json_encode($data));
-  fflush($fp);
-  flock($fp, LOCK_UN);
-  fclose($fp);
-}
-function dd_throttled(string $key): bool {
-  $data = dd_throttle_read();
-  $rec = $data[$key] ?? null;
-  if (!$rec) return false;
-  if (round(microtime(true) * 1000) > ($rec['resetAt'] ?? 0)) return false;
-  return ($rec['count'] ?? 0) >= 8;
-}
-function dd_bump_attempt(string $key): void {
-  $data = dd_throttle_read();
-  // purge expired buckets opportunistically
-  $now = round(microtime(true) * 1000);
-  foreach ($data as $k => $rec) {
-    if (($rec['resetAt'] ?? 0) < $now) unset($data[$k]);
+function dd_throttle_update(callable $update) {
+  $path = dd_throttle_file();
+  $fp = @fopen($path, 'c+');
+  if (!$fp) throw new RuntimeException('Could not open the authentication throttle file.');
+  try {
+    if (!flock($fp, LOCK_EX)) throw new RuntimeException('Could not lock the authentication throttle file.');
+    rewind($fp);
+    $raw = stream_get_contents($fp);
+    if ($raw === false) throw new RuntimeException('Could not read the authentication throttle file.');
+    $data = [];
+    if (trim($raw) !== '') {
+      $decoded = json_decode($raw, true);
+      if (!is_array($decoded)) throw new RuntimeException('The authentication throttle file is invalid JSON.');
+      $data = $decoded;
+    }
+
+    $now = (int) round(microtime(true) * 1000);
+    foreach ($data as $key => $record) {
+      if (!is_array($record) || (int) ($record['resetAt'] ?? 0) <= $now) unset($data[$key]);
+    }
+    $result = $update($data, $now);
+    if (count($data) > 10000) {
+      uasort($data, static fn($a, $b) => (int) ($a['resetAt'] ?? 0) <=> (int) ($b['resetAt'] ?? 0));
+      $data = array_slice($data, -10000, null, true);
+    }
+    $json = json_encode($data);
+    if ($json === false) throw new RuntimeException('Could not encode authentication throttle data.');
+    rewind($fp);
+    if (!ftruncate($fp, 0) || fwrite($fp, $json) !== strlen($json) || !fflush($fp)) {
+      throw new RuntimeException('Could not persist authentication throttle data.');
+    }
+    return $result;
+  } finally {
+    if (is_resource($fp)) {
+      flock($fp, LOCK_UN);
+      fclose($fp);
+    }
   }
-  $rec = $data[$key] ?? ['count' => 0, 'resetAt' => $now + 5 * 60 * 1000];
-  $rec['count'] += 1;
-  $data[$key] = $rec;
-  dd_throttle_write($data);
+}
+function dd_throttle_limit(): int {
+  $value = filter_var(getenv('DD_AUTH_MAX_ATTEMPTS') ?: '8', FILTER_VALIDATE_INT);
+  return $value === false ? 8 : max(3, min(50, $value));
+}
+function dd_throttle_window_ms(): int {
+  $value = filter_var(getenv('DD_AUTH_WINDOW_SECONDS') ?: '300', FILTER_VALIDATE_INT);
+  $seconds = $value === false ? 300 : max(60, min(3600, $value));
+  return $seconds * 1000;
+}
+function dd_throttle_attempt(string $key): bool {
+  $key = hash('sha256', $key);
+  return dd_throttle_update(static function (array &$data, int $now) use ($key): bool {
+    $record = $data[$key] ?? ['count' => 0, 'resetAt' => $now + dd_throttle_window_ms()];
+    if ((int) ($record['count'] ?? 0) >= dd_throttle_limit()) {
+      $data[$key] = $record;
+      return true;
+    }
+    $record['count'] = (int) ($record['count'] ?? 0) + 1;
+    $data[$key] = $record;
+    return false;
+  });
 }
 function dd_clear_attempt(string $key): void {
-  $data = dd_throttle_read();
-  if (isset($data[$key])) { unset($data[$key]); dd_throttle_write($data); }
+  $key = hash('sha256', $key);
+  dd_throttle_update(static function (array &$data) use ($key): void {
+    unset($data[$key]);
+  });
 }
 
 /* ════════════════ misc ════════════════ */
 function dd_email_ok(?string $e): bool {
-  return (bool) preg_match('/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/', trim((string) $e));
+  $email = trim((string) $e);
+  return strlen($email) <= 190 && (bool) preg_match('/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/', $email);
 }
 function dd_esc_html($s): string {
   return htmlspecialchars((string) $s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 function dd_json_out($value, int $status = 200, array $headers = []): array {
-  return ['status' => $status, 'headers' => $headers, 'body' => json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'content_type' => 'application/json; charset=utf-8'];
+  return ['status' => $status, 'headers' => array_merge(['Cache-Control' => 'no-store'], $headers), 'body' => json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'content_type' => 'application/json; charset=utf-8'];
 }
 function dd_boolish($v): string {
   return ($v === true || $v === 'true' || $v === 1 || $v === '1') ? '1' : '0';
@@ -287,9 +282,59 @@ function dd_base_path(): string {
   return $p = '';                                                             // CLI/tests: root-mounted
 }
 
+function dd_request_is_https(): bool {
+  if ((!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
+      || (int) ($_SERVER['SERVER_PORT'] ?? 0) === 443) return true;
+  if (getenv('DD_TRUST_PROXY') !== '1') return false;
+  $forwarded = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
+  return $forwarded === 'https';
+}
+
+function dd_security_headers(bool $https): array {
+  $headers = [
+    'X-Content-Type-Options' => 'nosniff',
+    'X-Frame-Options' => 'SAMEORIGIN',
+    'Referrer-Policy' => 'strict-origin-when-cross-origin',
+    'Permissions-Policy' => 'camera=(), microphone=(), geolocation=()',
+  ];
+  if ($https) $headers['Strict-Transport-Security'] = 'max-age=31536000';
+  return $headers;
+}
+
+function dd_emit_security_headers(bool $https): void {
+  header_remove('X-Powered-By');
+  foreach (dd_security_headers($https) as $name => $value) header("$name: $value");
+}
+
+function dd_valid_host_header(string $host): bool {
+  if (!preg_match('/^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::([0-9]{1,5}))?$/D', $host, $matches)) return false;
+  if (isset($matches[1]) && ((int) $matches[1] < 1 || (int) $matches[1] > 65535)) return false;
+  return true;
+}
+
+function dd_require_same_origin(array $req): void {
+  $origin = trim((string) ($req['headers']['origin'] ?? ''));
+  if ($origin === '') return;
+  $parts = parse_url($origin);
+  $host = trim((string) ($req['headers']['host'] ?? ''));
+  $scheme = !empty($req['https']) ? 'https' : 'http';
+  $current = $host !== '' && dd_valid_host_header($host) ? parse_url($scheme . '://' . $host) : false;
+  if (!is_array($parts) || !is_array($current)
+      || isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])
+      || (isset($parts['path']) && $parts['path'] !== '' && $parts['path'] !== '/')
+      || !in_array(strtolower((string) ($parts['scheme'] ?? '')), ['http', 'https'], true)
+      || strtolower((string) ($parts['scheme'] ?? '')) !== $scheme
+      || strtolower((string) ($parts['host'] ?? '')) !== strtolower((string) ($current['host'] ?? ''))
+      || (int) ($parts['port'] ?? ($parts['scheme'] === 'https' ? 443 : 80))
+        !== (int) ($current['port'] ?? ($scheme === 'https' ? 443 : 80))) {
+    throw new DdHttpError(403, 'Cross-origin request rejected');
+  }
+}
+
 function dd_base_url(array $req): string {
   $https = $req['https'] ?? false;
-  $host = $req['headers']['host'] ?? 'localhost';
+  $host = trim((string) ($req['headers']['host'] ?? 'localhost'));
+  if (!dd_valid_host_header($host)) $host = 'localhost';
   return ($https ? 'https' : 'http') . '://' . $host . dd_base_path();
 }
 

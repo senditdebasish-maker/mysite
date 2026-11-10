@@ -52,17 +52,18 @@ function dd_page_main(): void {
       $headers[strtolower(str_replace('_', '-', substr($k, 5)))] = $v;
     }
   }
-  $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
-        || ((int) ($_SERVER['SERVER_PORT'] ?? 0) === 443);
+  $https = dd_request_is_https();
   $page = (string) ($_GET['page'] ?? '/');
   if ($page === '' || $page === '/') $page = '/';
   $req = ['method' => $_SERVER['REQUEST_METHOD'] ?? 'GET', 'headers' => $headers, 'https' => $https];
-  $resp = dd_render_page($page, $req);
+  try {
+    $resp = dd_render_page($page, $req);
+  } catch (Throwable $e) {
+    error_log('[page] ' . $e);
+    $resp = ['status' => 503, 'headers' => ['Cache-Control' => 'no-store'], 'body' => 'Service temporarily unavailable.', 'content_type' => 'text/plain; charset=utf-8'];
+  }
   http_response_code($resp['status']);
-  header('X-Content-Type-Options: nosniff');
-  header('X-Frame-Options: SAMEORIGIN');
-  header('Referrer-Policy: strict-origin-when-cross-origin');
+  dd_emit_security_headers($https);
   foreach (($resp['headers'] ?? []) as $n => $v) header("$n: $v");
   header('Content-Type: ' . ($resp['content_type'] ?? 'text/html; charset=utf-8'));
   echo $resp['body'];

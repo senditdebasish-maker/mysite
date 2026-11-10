@@ -14,26 +14,37 @@ function dd_body_json(array $req): array {
   $raw = $req['raw'] ?? '';
   if ($raw === '' || $raw === null) return [];
   $j = json_decode($raw, true);
-  return is_array($j) ? $j : [];
+  if (json_last_error() !== JSON_ERROR_NONE || !is_array($j)) {
+    throw new DdHttpError(400, 'Request body must be a valid JSON object');
+  }
+  return $j;
 }
 
 /* ════════════════ auth ════════════════ */
 function route_auth_register(array $req): array {
+  if (dd_throttle_attempt(dd_throttle_key($req, 'register'))) {
+    throw new DdHttpError(429, 'Too many registration attempts — try again in 5 minutes');
+  }
   $b = dd_body_json($req);
   $name = trim((string) ($b['name'] ?? ''));
+  $username = strtolower(trim((string) ($b['username'] ?? '')));
   $email = trim((string) ($b['email'] ?? ''));
   $password = (string) ($b['password'] ?? '');
   $phone = trim((string) ($b['phone'] ?? ''));
   if ($name === '') throw new DdHttpError(400, 'Please tell me your name');
+  if (mb_strlen($name) > 80) throw new DdHttpError(400, 'Name must be 80 characters or fewer');
+  if (!preg_match('/^[a-z0-9._-]{3,32}$/', $username)) throw new DdHttpError(400, 'Username must be 3–32 characters: letters, numbers, dot, underscore or hyphen');
   if (!dd_email_ok($email)) throw new DdHttpError(400, "That email doesn't look right");
-  if (strlen($password) < 6) throw new DdHttpError(400, 'Password must be at least 6 characters');
+  if (strlen($password) < 8) throw new DdHttpError(400, 'Password must be at least 8 characters');
+  if (strlen($password) > 72) throw new DdHttpError(400, 'Password must be 72 bytes or fewer');
+  if (mb_strlen($phone) > 32) throw new DdHttpError(400, 'Phone must be 32 characters or fewer');
   $norm = strtolower($email);
-  $stmt = dd_db()->prepare('SELECT 1 FROM users WHERE email = ?');
-  $stmt->execute([$norm]);
+  $stmt = dd_db()->prepare('SELECT 1 FROM users WHERE email = ? OR username = ?');
+  $stmt->execute([$norm, $username]);
   if ($stmt->fetch()) throw new DdHttpError(409, 'An account with this email already exists — try signing in');
   $pair = dd_password_pair($password);
-  $ins = dd_db()->prepare('INSERT INTO users (name,email,phone,password_hash,password_salt,role) VALUES (?,?,?,?,?,\'user\')');
-  $ins->execute([$name, $norm, $phone, $pair['hash'], $pair['salt']]);
+  $ins = dd_db()->prepare("INSERT INTO users (name,username,email,phone,password_hash,password_salt,role) VALUES (?,?,?,?,?,?,'user')");
+  $ins->execute([$name, $username, $norm, $phone, $pair['hash'], $pair['salt']]);
   $id = (int) dd_db()->lastInsertId();
   dd_create_session($req, $id);
   $u = dd_db()->prepare('SELECT * FROM users WHERE id = ?'); $u->execute([$id]);
@@ -42,22 +53,129 @@ function route_auth_register(array $req): array {
 
 function route_auth_login(array $req): array {
   $b = dd_body_json($req);
-  $email = trim((string) ($b['email'] ?? ''));
+  $identifier = strtolower(trim((string) ($b['identifier'] ?? $b['email'] ?? '')));
   $password = (string) ($b['password'] ?? '');
-  if ($email === '' || $password === '') throw new DdHttpError(400, 'Email and password are required');
-  $norm = strtolower($email);
-  $key = dd_throttle_key($req, $norm);
-  if (dd_throttled($key)) throw new DdHttpError(429, 'Too many attempts — try again in 5 minutes');
-  $u = dd_db()->prepare('SELECT * FROM users WHERE email = ?');
-  $u->execute([$norm]);
+  if ($identifier === '' || $password === '') throw new DdHttpError(400, 'Username or email and password are required');
+  $key = dd_throttle_key($req, $identifier);
+  if (dd_throttle_attempt($key)) throw new DdHttpError(429, 'Too many attempts — try again in 5 minutes');
+  $u = dd_db()->prepare('SELECT * FROM users WHERE username = ? OR email = ?');
+  $u->execute([$identifier, $identifier]);
   $user = $u->fetch();
   if (!$user || !dd_verify_password($password, $user)) {
-    dd_bump_attempt($key);
-    throw new DdHttpError(401, 'Invalid email or password');
+    throw new DdHttpError(401, 'Invalid username/email or password');
+  }
+  dd_clear_attempt($key);
+  if (password_needs_rehash((string) $user['password_hash'], PASSWORD_DEFAULT)) {
+    dd_db()->prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+      ->execute([password_hash($password, PASSWORD_DEFAULT), $user['id']]);
+  }
+  dd_create_session($req, (int) $user['id']);
+  return dd_json_out(['user' => dd_user_public($user)]);
+}
+
+function dd_smtp_settings(): array {
+  $smtp = dd_read_install()['smtp'] ?? [];
+  return is_array($smtp) ? $smtp : [];
+}
+
+function dd_send_email(string $to, string $subject, string $html, ?array $smtpOverride = null): void {
+  $smtp = $smtpOverride ?? dd_smtp_settings();
+  if (empty($smtp['email']) || empty($smtp['password'])) {
+    throw new DdHttpError(503, 'Gmail SMTP is not configured. Complete the SMTP step in setup first.');
+  }
+  $autoload = dirname(__DIR__) . '/vendor/autoload.php';
+  if (!is_file($autoload)) throw new DdHttpError(503, 'PHPMailer is missing. Run Composer install in the XAMPP project folder.');
+  require_once $autoload;
+  $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+  try {
+    $mail->isSMTP();
+    $mail->Host = 'smtp.gmail.com';
+    $mail->SMTPAuth = true;
+    $mail->Username = $smtp['email'];
+    $mail->Password = $smtp['password'];
+    $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+    $mail->Port = 587;
+    $mail->CharSet = 'UTF-8';
+    $mail->setFrom($smtp['email'], dd_site_get('site_brand') ?: 'Debasish Store');
+    $mail->addAddress($to);
+    $mail->isHTML(true);
+    $mail->Subject = $subject;
+    $mail->Body = $html;
+    $mail->AltBody = trim(strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $html)));
+    $mail->send();
+  } catch (PHPMailer\PHPMailer\Exception $e) {
+    error_log('[mail] SMTP delivery failed: ' . $e->getMessage());
+    throw new DdHttpError(502, 'Email could not be sent. Check the Gmail address and App Password in setup.');
+  }
+}
+
+function route_auth_otp_request(array $req): array {
+  $b = dd_body_json($req);
+  $identifier = strtolower(trim((string) ($b['identifier'] ?? '')));
+  if ($identifier === '') throw new DdHttpError(400, 'Enter your username or email');
+  $key = dd_throttle_key($req, 'otp:' . $identifier);
+  if (dd_throttle_attempt($key) || dd_throttle_attempt(dd_throttle_key($req, 'otp-ip'))) {
+    throw new DdHttpError(429, 'Too many code requests — try again in 5 minutes');
+  }
+  $stmt = dd_db()->prepare('SELECT id,email FROM users WHERE username = ? OR email = ?');
+  $stmt->execute([$identifier, $identifier]);
+  $user = $stmt->fetch();
+  if (!$user) return dd_json_out(['ok' => true, 'message' => 'If the account exists, a sign-in code has been sent.']);
+  $code = (string) random_int(100000, 999999);
+  $hash = password_hash($code, PASSWORD_DEFAULT);
+  try {
+    dd_send_email($user['email'], 'Your sign-in code', '<p>Your sign-in code is:</p><p style="font-size:28px;font-weight:bold;letter-spacing:8px">' . $code . '</p><p>It expires in 10 minutes. If you did not request this, ignore this email.</p>');
+  } catch (DdHttpError $e) {
+    error_log('[auth-otp] delivery failed: ' . $e->getMessage());
+    throw $e;
+  }
+  dd_db()->prepare('UPDATE users SET email_otp_hash = ?, email_otp_expires_at = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 10 MINUTE), email_otp_attempts = 0 WHERE id = ?')
+    ->execute([$hash, $user['id']]);
+  return dd_json_out(['ok' => true, 'message' => 'If the account exists, a sign-in code has been sent.']);
+}
+
+function route_auth_otp_verify(array $req): array {
+  $b = dd_body_json($req);
+  $identifier = strtolower(trim((string) ($b['identifier'] ?? '')));
+  $code = trim((string) ($b['code'] ?? ''));
+  if ($identifier === '' || !preg_match('/^\d{6}$/', $code)) throw new DdHttpError(400, 'Enter your username/email and the 6-digit code');
+  $key = dd_throttle_key($req, 'otp-verify:' . $identifier);
+  if (dd_throttle_attempt($key)) throw new DdHttpError(429, 'Too many attempts — try again in 5 minutes');
+  $stmt = dd_db()->prepare('SELECT * FROM users WHERE username = ? OR email = ?');
+  $stmt->execute([$identifier, $identifier]);
+  $user = $stmt->fetch();
+  if (!$user || empty($user['email_otp_hash']) || empty($user['email_otp_expires_at']) ||
+      (int) $user['email_otp_attempts'] >= 5 ||
+      !password_verify($code, (string) $user['email_otp_hash'])) {
+    if ($user && !empty($user['email_otp_hash'])) {
+      dd_db()->prepare('UPDATE users SET email_otp_attempts = email_otp_attempts + 1 WHERE id = ? AND email_otp_attempts < 5 AND email_otp_expires_at >= UTC_TIMESTAMP()')->execute([$user['id']]);
+    }
+    throw new DdHttpError(401, 'That code is invalid or expired. Request a new one and try again.');
+  }
+  $consume = dd_db()->prepare('UPDATE users SET email_otp_hash = NULL, email_otp_expires_at = NULL, email_otp_attempts = 0 WHERE id = ? AND email_otp_hash = ? AND email_otp_expires_at >= UTC_TIMESTAMP() AND email_otp_attempts < 5');
+  $consume->execute([$user['id'], $user['email_otp_hash']]);
+  if ($consume->rowCount() !== 1) {
+    throw new DdHttpError(401, 'That code is invalid or expired. Request a new one and try again.');
   }
   dd_clear_attempt($key);
   dd_create_session($req, (int) $user['id']);
   return dd_json_out(['user' => dd_user_public($user)]);
+}
+
+function route_setup_smtp(array $req): array {
+  $previous = dd_read_install();
+  $current = isset($previous['database']) && is_array($previous['database']) ? dd_current_user($req) : null;
+  dd_require_setup_open($current);
+  $b = dd_body_json($req);
+  $email = strtolower(trim((string) ($b['email'] ?? '')));
+  $password = preg_replace('/\s+/', '', trim((string) ($b['password'] ?? ''))) ?? '';
+  if (!dd_email_ok($email)) throw new DdHttpError(400, 'Enter the Gmail address used for SMTP');
+  if ($password === '') $password = (string) (($previous['smtp']['password'] ?? ''));
+  if ($password === '') throw new DdHttpError(400, 'Enter a Gmail App Password');
+  dd_send_email($email, 'Gmail SMTP test', '<p>Your Gmail SMTP settings are working. Email OTP sign-in is ready.</p>', ['email' => $email, 'password' => $password]);
+  $previous['smtp'] = ['email' => $email, 'password' => $password];
+  dd_write_install($previous);
+  return dd_json_out(['ok' => true, 'email' => $email]);
 }
 
 function route_auth_logout(array $req): array {
@@ -75,6 +193,8 @@ function route_me_put(array $req): array {
   $name = trim((string) ($b['name'] ?? $u['name']));
   $phone = trim((string) ($b['phone'] ?? $u['phone']));
   if ($name === '') throw new DdHttpError(400, "Name can't be empty");
+  if (mb_strlen($name) > 80) throw new DdHttpError(400, 'Name must be 80 characters or fewer');
+  if (mb_strlen($phone) > 32) throw new DdHttpError(400, 'Phone must be 32 characters or fewer');
   dd_db()->prepare('UPDATE users SET name = ?, phone = ? WHERE id = ?')->execute([$name, $phone, $u['id']]);
   $stmt = dd_db()->prepare('SELECT * FROM users WHERE id = ?'); $stmt->execute([$u['id']]);
   return dd_json_out(['user' => dd_user_public($stmt->fetch())]);
@@ -114,8 +234,16 @@ function route_coupon_validate(array $req): array {
 
 /* ════════════════ products ════════════════ */
 function route_products(array $req): array {
-  $rows = dd_db()->query('SELECT * FROM products WHERE active = 1 ORDER BY created_at, id')->fetchAll();
+  $rows = dd_db()->query('SELECT p.*, c.name AS category_name FROM products p
+    LEFT JOIN categories c ON c.id = p.category_id WHERE p.active = 1 AND (c.active = 1 OR c.id IS NULL)
+    ORDER BY p.created_at, p.id')->fetchAll();
   return dd_json_out(['products' => array_map('dd_product_out', $rows)]);
+}
+function route_categories(array $req): array {
+  $rows = dd_db()->query("SELECT c.id,c.name,c.slug,c.description,c.sort_order,COUNT(p.id) AS product_count
+    FROM categories c LEFT JOIN products p ON p.category_id = c.id AND p.active = 1
+    WHERE c.active = 1 GROUP BY c.id ORDER BY c.sort_order,c.name")->fetchAll();
+  return dd_json_out(['categories' => $rows]);
 }
 function dd_product_active(string $id): ?array {
   $stmt = dd_db()->prepare('SELECT * FROM products WHERE id = ? AND active = 1');
@@ -134,25 +262,47 @@ function route_orders_post(array $req): array {
   $me = dd_current_user($req);
   $name = trim((string) ($b['customer_name'] ?? ($me['name'] ?? '')));
   if ($name === '') throw new DdHttpError(400, 'Please tell me your name');
+  $phone = trim((string) ($b['phone'] ?? ''));
+  $address = trim((string) ($b['address'] ?? ''));
+  $note = trim((string) ($b['note'] ?? ''));
+  if (mb_strlen($name) > 120 || mb_strlen($phone) > 32 || strlen($address) > 60000 || strlen($note) > 60000) {
+    throw new DdHttpError(400, 'One or more order fields exceed their maximum length');
+  }
 
   $pay = (($b['payment'] ?? '') === 'upi') ? 'upi' : 'cod';
   if ($pay === 'cod' && !$cfg['codEnabled']) throw new DdHttpError(400, 'Cash on Delivery is temporarily unavailable — please choose UPI on delivery');
 
-  $picked = [];
-  $subtotal = 0;
+  $requested = [];
   $maxQty = max(1, (int) $cfg['maxQty']);
-  $get = dd_db()->prepare('SELECT * FROM products WHERE id = ? AND active = 1');
   foreach ($items as $line) {
     if (!is_array($line)) throw new DdHttpError(400, 'One of the items is no longer available');
     $qty = max(1, min($maxQty, (int) ($line['qty'] ?? 1) ?: 1));
-    $get->execute([(string) ($line['id'] ?? '')]);
+    $productId = trim((string) ($line['id'] ?? ''));
+    if ($productId === '') throw new DdHttpError(400, 'One of the items is no longer available');
+    $requested[$productId] = min($maxQty, ($requested[$productId] ?? 0) + $qty);
+  }
+  ksort($requested, SORT_STRING);
+
+  $db = dd_db();
+  $db->beginTransaction();
+  try {
+  $picked = [];
+  $subtotal = 0;
+  $get = $db->prepare('SELECT p.*, c.name AS category_name FROM products p
+    LEFT JOIN categories c ON c.id = p.category_id
+    WHERE p.id = ? AND p.active = 1 AND (c.active = 1 OR c.id IS NULL) FOR UPDATE');
+  foreach ($requested as $productId => $qty) {
+    $get->execute([$productId]);
     $p = $get->fetch();
     if (!$p) throw new DdHttpError(400, 'One of the items is no longer available');
-    if ((int) $p['stock'] < $qty) throw new DdHttpError(400, "Only {$p['stock']} left of {$p['name']}");
-    $picked[] = ['id' => $p['id'], 'name' => $p['name'], 'price' => (int) $p['price'], 'qty' => $qty];
+    if ((int) $p['stock'] < $qty) throw new DdHttpError(409, "Only {$p['stock']} left of {$p['name']}");
+    $picked[] = [
+      'id' => $p['id'], 'category_id' => isset($p['category_id']) ? (int) $p['category_id'] : null,
+      'category' => (string) ($p['category_name'] ?? $p['tag']), 'name' => $p['name'],
+      'price' => (int) $p['price'], 'qty' => $qty,
+    ];
     $subtotal += (int) $p['price'] * $qty;
   }
-
   $couponCode = '';
   $discount = 0;
   $couponRaw = trim((string) ($b['coupon'] ?? ''));
@@ -173,35 +323,45 @@ function route_orders_post(array $req): array {
   $method = (($b['delivery_method'] ?? '') === 'express') ? 'express' : 'standard';
   $delivery = $method === 'express' ? (int) $cfg['expressFee'] : ($subtotal >= $cfg['freeAt'] ? 0 : $cfg['deliveryFee']);
   $total = max(0, $subtotal - $discount + $delivery);
-  $db = dd_db();
-  $db->beginTransaction();
-  try {
-    $ins = $db->prepare("INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,payment,coupon_code,discount,delivery_method,status)
-                         VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')");
-    $ins->execute([$me ? (int) $me['id'] : null, $name, trim((string) ($b['phone'] ?? '')), trim((string) ($b['address'] ?? '')), trim((string) ($b['note'] ?? '')),
-                   json_encode($picked, JSON_UNESCAPED_UNICODE), $total, $pay, $couponCode, $discount, $method]);
+    $invoiceToken = $me ? null : bin2hex(random_bytes(32));
+    $ins = $db->prepare("INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,payment,coupon_code,discount,delivery_method,status,invoice_token_hash)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?)");
+    $ins->execute([$me ? (int) $me['id'] : null, $name, $phone, $address, $note,
+                   json_encode($picked, JSON_UNESCAPED_UNICODE), $total, $pay, $couponCode, $discount, $method,
+                   $invoiceToken === null ? null : hash('sha256', $invoiceToken)]);
     $orderId = (int) $db->lastInsertId();
-    if ($couponCode !== '') $db->prepare('UPDATE coupons SET used = used + 1 WHERE code = ?')->execute([$couponCode]);
-    $dec = $db->prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?');
-    foreach ($picked as $it) $dec->execute([$it['qty'], $it['id']]);
+    if ($couponCode !== '') {
+      $use = $db->prepare('UPDATE coupons SET used = used + 1 WHERE code = ? AND active = 1 AND (max_uses = 0 OR used < max_uses)');
+      $use->execute([$couponCode]);
+      if ($use->rowCount() !== 1) throw new DdHttpError(409, 'This coupon has just been fully used or disabled');
+    }
+    $dec = $db->prepare('UPDATE products SET stock = stock - ? WHERE id = ? AND active = 1 AND stock >= ?');
+    foreach ($picked as $it) {
+      $dec->execute([$it['qty'], $it['id'], $it['qty']]);
+      if ($dec->rowCount() !== 1) throw new DdHttpError(409, "Stock changed for {$it['name']}; please review your cart");
+    }
     $db->commit();
   } catch (Throwable $e) {
-    $db->rollBack();
+    if ($db->inTransaction()) $db->rollBack();
     throw $e;
   }
 
   return dd_json_out(['order' => [
     'id' => $orderId, 'total' => $total, 'subtotal' => $subtotal, 'discount' => $discount, 'delivery' => $delivery,
     'coupon' => $couponCode !== '' ? $couponCode : null, 'payment' => $pay, 'status' => 'pending', 'items' => $picked, 'delivery_method' => $method,
+    'invoice_token' => $invoiceToken,
   ]], 201);
 }
 
 function route_my_orders(array $req): array {
   $u = dd_require_auth($req);
-  $stmt = dd_db()->prepare("SELECT * FROM orders WHERE user_id = ? ORDER BY datetime(created_at) DESC, id DESC");
+  $stmt = dd_db()->prepare("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC, id DESC");
   $stmt->execute([$u['id']]);
   $rows = $stmt->fetchAll();
-  foreach ($rows as &$o) $o['items'] = dd_parse_items($o['items_json'] ?? null);
+  foreach ($rows as &$o) {
+    $o['items'] = dd_parse_items($o['items_json'] ?? null);
+    unset($o['invoice_token_hash']);
+  }
   return dd_json_out(['orders' => $rows]);
 }
 
@@ -209,8 +369,15 @@ function route_inquiries_post(array $req): array {
   $b = dd_body_json($req);
   $name = trim((string) ($b['name'] ?? ''));
   if ($name === '') throw new DdHttpError(400, 'Name is required');
+  $phone = trim((string) ($b['phone'] ?? ''));
+  $need = trim((string) ($b['need'] ?? ''));
+  $budget = trim((string) ($b['budget'] ?? ''));
+  $message = trim((string) ($b['message'] ?? ''));
+  if (mb_strlen($name) > 120 || mb_strlen($phone) > 32 || mb_strlen($need) > 160 || mb_strlen($budget) > 80 || strlen($message) > 60000) {
+    throw new DdHttpError(400, 'One or more inquiry fields exceed their maximum length');
+  }
   dd_db()->prepare('INSERT INTO inquiries (name,phone,need,budget,message) VALUES (?,?,?,?,?)')
-    ->execute([$name, trim((string) ($b['phone'] ?? '')), trim((string) ($b['need'] ?? '')), trim((string) ($b['budget'] ?? '')), trim((string) ($b['message'] ?? ''))]);
+    ->execute([$name, $phone, $need, $budget, $message]);
   return dd_json_out(['ok' => true], 201);
 }
 
@@ -218,7 +385,7 @@ function route_inquiries_post(array $req): array {
 function route_admin_stats(array $req): array {
   dd_require_admin($req);
   $revenue = (int) dd_db()->query("SELECT COALESCE(SUM(total),0) AS s FROM orders WHERE status != 'cancelled'")->fetch()['s'];
-  $todayRev = (int) dd_db()->query("SELECT COALESCE(SUM(total),0) AS s FROM orders WHERE status != 'cancelled' AND date(created_at) = date('now')")->fetch()['s'];
+  $todayRev = (int) dd_db()->query("SELECT COALESCE(SUM(total),0) AS s FROM orders WHERE status != 'cancelled' AND DATE(created_at) = CURDATE()")->fetch()['s'];
   $orders = (int) dd_db()->query('SELECT COUNT(*) AS n FROM orders')->fetch()['n'];
   $pending = (int) dd_db()->query("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending'")->fetch()['n'];
   $customers = (int) dd_db()->query("SELECT COUNT(*) AS n FROM users WHERE role = 'user'")->fetch()['n'];
@@ -231,10 +398,47 @@ function route_admin_stats(array $req): array {
 
 function route_admin_orders(array $req): array {
   dd_require_admin($req);
-  $rows = dd_db()->query("SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id = o.user_id
-                          ORDER BY datetime(o.created_at) DESC, o.id DESC LIMIT 200")->fetchAll();
-  foreach ($rows as &$o) $o['items'] = dd_parse_items($o['items_json'] ?? null);
-  return dd_json_out(['orders' => $rows]);
+  $query = $req['query'] ?? [];
+  $status = trim((string) ($query['status'] ?? 'all'));
+  if (!in_array($status, ['all', 'pending', 'confirmed', 'shipped', 'delivered', 'cancelled'], true)) {
+    throw new DdHttpError(400, 'Invalid order status filter');
+  }
+  $from = trim((string) ($query['from'] ?? ''));
+  $to = trim((string) ($query['to'] ?? ''));
+  foreach (['from' => $from, 'to' => $to] as $label => $date) {
+    if ($date !== '' && (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ||
+        !checkdate((int) substr($date, 5, 2), (int) substr($date, 8, 2), (int) substr($date, 0, 4)))) {
+      throw new DdHttpError(400, "Invalid $label date");
+    }
+  }
+  if ($from !== '' && $to !== '' && $from > $to) throw new DdHttpError(400, 'Start date must be on or before end date');
+  $search = mb_substr(trim((string) ($query['q'] ?? '')), 0, 100);
+  $page = max(1, min(100000, (int) ($query['page'] ?? 1)));
+  $pageSize = max(1, min(100, (int) ($query['per_page'] ?? 50)));
+  $where = [];
+  $params = [];
+  if ($status !== 'all') { $where[] = 'o.status = ?'; $params[] = $status; }
+  if ($from !== '') { $where[] = "o.created_at >= CONCAT(?, ' 00:00:00')"; $params[] = $from; }
+  if ($to !== '') { $where[] = "o.created_at < DATE_ADD(?, INTERVAL 1 DAY)"; $params[] = $to; }
+  if ($search !== '') {
+    $where[] = '(CAST(o.id AS CHAR) LIKE ? OR o.customer_name LIKE ? OR o.phone LIKE ? OR u.email LIKE ? OR o.coupon_code LIKE ? OR o.address LIKE ? OR o.note LIKE ? OR o.items_json LIKE ?)';
+    for ($i = 0; $i < 8; $i++) $params[] = '%' . $search . '%';
+  }
+  $whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+  $count = dd_db()->prepare("SELECT COUNT(*) FROM orders o LEFT JOIN users u ON u.id = o.user_id$whereSql");
+  $count->execute($params);
+  $total = (int) $count->fetchColumn();
+  $offset = ($page - 1) * $pageSize;
+  $rowsStmt = dd_db()->prepare("SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id = o.user_id$whereSql
+                                ORDER BY o.created_at DESC, o.id DESC LIMIT $pageSize OFFSET $offset");
+  $rowsStmt->execute($params);
+  $rows = $rowsStmt->fetchAll();
+  foreach ($rows as &$o) {
+    $o['items'] = dd_parse_items($o['items_json'] ?? null);
+    unset($o['items_json']);
+    unset($o['invoice_token_hash']);
+  }
+  return dd_json_out(['orders' => $rows, 'total' => $total, 'page' => $page, 'per_page' => $pageSize]);
 }
 
 function route_admin_order_status(array $req, string $id): array {
@@ -244,13 +448,35 @@ function route_admin_order_status(array $req, string $id): array {
   if (!in_array($status, ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'], true)) {
     throw new DdHttpError(400, 'Invalid status');
   }
-  $stmt = dd_db()->prepare('UPDATE orders SET status = ? WHERE id = ?');
-  $stmt->execute([$status, (int) $id]);
-  if ($stmt->rowCount() === 0) {
-    $chk = dd_db()->prepare('SELECT 1 FROM orders WHERE id = ?'); $chk->execute([(int) $id]);
-    if (!$chk->fetch()) throw new DdHttpError(404, 'Order not found');
+  $db = dd_db();
+  $db->beginTransaction();
+  try {
+    $stmt = $db->prepare('SELECT * FROM orders WHERE id = ? FOR UPDATE');
+    $stmt->execute([(int) $id]);
+    $order = $stmt->fetch();
+    if (!$order) throw new DdHttpError(404, 'Order not found');
+    if ($order['status'] === 'cancelled' && $status !== 'cancelled') {
+      throw new DdHttpError(409, 'Cancelled orders are final. Create a new order if the customer still wants to buy.');
+    }
+    if ($status === 'cancelled' && $order['status'] !== 'cancelled') {
+      $db->prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?")->execute([$order['id']]);
+      $increment = $db->prepare('UPDATE products SET stock = LEAST(2147483647, stock + ?) WHERE id = ?');
+      foreach (dd_parse_items($order['items_json'] ?? null) as $item) {
+        if (!is_array($item) || empty($item['id'])) continue;
+        $increment->execute([max(1, (int) ($item['qty'] ?? 1)), $item['id']]);
+      }
+      if (($order['coupon_code'] ?? '') !== '') {
+        $db->prepare('UPDATE coupons SET used = GREATEST(0, used - 1) WHERE code = ?')->execute([$order['coupon_code']]);
+      }
+    } elseif ($status !== $order['status']) {
+      $db->prepare('UPDATE orders SET status = ? WHERE id = ?')->execute([$status, $order['id']]);
+    }
+    $db->commit();
+  } catch (Throwable $e) {
+    if ($db->inTransaction()) $db->rollBack();
+    throw $e;
   }
-  return dd_json_out(['ok' => true]);
+  return dd_json_out(['ok' => true, 'status' => $status]);
 }
 
 function dd_read_product_body(array $b, ?array $existing = null): array {
@@ -262,32 +488,131 @@ function dd_read_product_body(array $b, ?array $existing = null): array {
   if ($tag === '') $tag = 'Tech';
   $img = trim((string) ($b['img'] ?? ($existing['img'] ?? 'assets/img/product-mouse.jpg')));
   if ($img === '') $img = 'assets/img/product-mouse.jpg';
+  if (mb_strlen($name) > 190 || mb_strlen($meta) > 255 || mb_strlen($tag) > 80 || mb_strlen($img) > 255) {
+    throw new DdHttpError(400, 'Product text fields exceed their maximum length');
+  }
   $rating = (float) ($b['rating'] ?? ($existing['rating'] ?? 4.5));
   $rating = max(0, min(5, is_finite($rating) ? $rating : 4.5));
   $activeRaw = $b['active'] ?? ($existing['active'] ?? true);
   $active = ($activeRaw === true || $activeRaw === 'true' || $activeRaw === 1 || $activeRaw === '1') ? 1 : 0;
   return [
+    'category_id' => array_key_exists('category_id', $b) ? dd_clampi($b['category_id'], 1, PHP_INT_MAX, 0) : (int) ($existing['category_id'] ?? 0),
     'name' => $name,
     'price' => dd_clampi($b['price'] ?? ($existing['price'] ?? 0), 0, PHP_INT_MAX, 0),
     'was'   => dd_clampi($b['was']   ?? ($existing['was']   ?? 0), 0, PHP_INT_MAX, 0),
-    'stock' => dd_clampi($b['stock'] ?? ($existing['stock'] ?? 0), 0, PHP_INT_MAX, 0),
+    'stock' => dd_clampi($b['stock'] ?? ($existing['stock'] ?? 0), 0, 2147483647, 0),
     'rating' => $rating, 'meta' => $meta, 'tag' => $tag, 'img' => $img, 'active' => $active,
   ];
 }
 
+function dd_category_out(array $row): array {
+  return [
+    'id' => (int) $row['id'], 'name' => (string) $row['name'], 'slug' => (string) $row['slug'],
+    'description' => (string) $row['description'], 'active' => (bool) $row['active'],
+    'sort_order' => (int) $row['sort_order'], 'product_count' => (int) ($row['product_count'] ?? 0),
+  ];
+}
+function dd_category_slug(string $name): string {
+  $ascii = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name);
+  $slug = strtolower(trim((string) preg_replace('/[^A-Za-z0-9]+/', '-', $ascii === false ? $name : $ascii), '-'));
+  if ($slug === '') $slug = 'category-' . substr(hash('sha256', $name), 0, 10);
+  return substr($slug, 0, 96);
+}
+function route_admin_categories_get(array $req): array {
+  dd_require_admin($req);
+  $rows = dd_db()->query('SELECT c.*, COUNT(p.id) AS product_count FROM categories c
+    LEFT JOIN products p ON p.category_id = c.id
+    GROUP BY c.id ORDER BY c.sort_order,c.name')->fetchAll();
+  return dd_json_out(['categories' => array_map('dd_category_out', $rows)]);
+}
+function route_admin_categories_post(array $req): array {
+  dd_require_admin($req);
+  $b = dd_body_json($req);
+  $name = trim((string) ($b['name'] ?? ''));
+  $description = trim((string) ($b['description'] ?? ''));
+  if ($name === '' || mb_strlen($name) > 80) throw new DdHttpError(400, 'Category name is required and must be 80 characters or fewer');
+  if (mb_strlen($description) > 255) throw new DdHttpError(400, 'Category description must be 255 characters or fewer');
+  $slug = dd_category_slug($name);
+  $check = dd_db()->prepare('SELECT id FROM categories WHERE name = ? OR slug = ?');
+  $check->execute([$name, $slug]);
+  if ($check->fetch()) throw new DdHttpError(409, 'A category with this name already exists');
+  $stmt = dd_db()->prepare('INSERT INTO categories (name,slug,description,active,sort_order) VALUES (?,?,?,1,?)');
+  $stmt->execute([$name, $slug, $description, dd_clampi($b['sort_order'] ?? 500, 0, 100000, 500)]);
+  $id = (int) dd_db()->lastInsertId();
+  $stmt = dd_db()->prepare('SELECT c.*, 0 AS product_count FROM categories c WHERE id = ?');
+  $stmt->execute([$id]);
+  return dd_json_out(['category' => dd_category_out($stmt->fetch())], 201);
+}
+function route_admin_categories_put(array $req, string $id): array {
+  dd_require_admin($req);
+  $db = dd_db();
+  $stmt = $db->prepare('SELECT * FROM categories WHERE id = ?');
+  $stmt->execute([(int) $id]);
+  $existing = $stmt->fetch();
+  if (!$existing) throw new DdHttpError(404, 'Category not found');
+  $b = dd_body_json($req);
+  $name = trim((string) ($b['name'] ?? $existing['name']));
+  $description = trim((string) ($b['description'] ?? $existing['description']));
+  $active = array_key_exists('active', $b) ? (int) dd_boolish($b['active']) : (int) $existing['active'];
+  $sortOrder = array_key_exists('sort_order', $b)
+    ? dd_clampi($b['sort_order'], 0, 100000, (int) $existing['sort_order'])
+    : (int) $existing['sort_order'];
+  if ($name === '' || mb_strlen($name) > 80) throw new DdHttpError(400, 'Category name is required and must be 80 characters or fewer');
+  if (mb_strlen($description) > 255) throw new DdHttpError(400, 'Category description must be 255 characters or fewer');
+  if (!$active && (int) $db->query('SELECT COUNT(*) FROM products WHERE category_id = ' . (int) $id . ' AND active = 1')->fetchColumn() > 0) {
+    throw new DdHttpError(409, 'Move or hide active products before deactivating this category');
+  }
+  $slug = $name === $existing['name'] ? $existing['slug'] : dd_category_slug($name);
+  $check = $db->prepare('SELECT id FROM categories WHERE id <> ? AND (name = ? OR slug = ?)');
+  $check->execute([(int) $id, $name, $slug]);
+  if ($check->fetch()) throw new DdHttpError(409, 'A category with this name already exists');
+  $db->beginTransaction();
+  try {
+    $db->prepare('UPDATE categories SET name=?,slug=?,description=?,active=?,sort_order=? WHERE id=?')
+      ->execute([$name, $slug, $description, $active, $sortOrder, (int) $id]);
+    if ($name !== $existing['name']) {
+      $db->prepare('UPDATE products SET tag = ? WHERE category_id = ?')->execute([$name, (int) $id]);
+    }
+    $db->commit();
+  } catch (Throwable $e) {
+    if ($db->inTransaction()) $db->rollBack();
+    throw $e;
+  }
+  $stmt = $db->prepare('SELECT c.*, (SELECT COUNT(*) FROM products p WHERE p.category_id=c.id) AS product_count FROM categories c WHERE id = ?');
+  $stmt->execute([(int) $id]);
+  return dd_json_out(['category' => dd_category_out($stmt->fetch())]);
+}
+function route_admin_categories_delete(array $req, string $id): array {
+  dd_require_admin($req);
+  $stmt = dd_db()->prepare('SELECT COUNT(*) FROM products WHERE category_id = ?');
+  $stmt->execute([(int) $id]);
+  if ((int) $stmt->fetchColumn() > 0) throw new DdHttpError(409, 'Reassign or remove products before deleting this category');
+  $delete = dd_db()->prepare('DELETE FROM categories WHERE id = ?');
+  $delete->execute([(int) $id]);
+  if ($delete->rowCount() !== 1) throw new DdHttpError(404, 'Category not found');
+  return dd_json_out(['ok' => true]);
+}
+
 function route_admin_products_get(array $req): array {
   dd_require_admin($req);
-  $rows = dd_db()->query('SELECT * FROM products ORDER BY created_at, id')->fetchAll();
+  $rows = dd_db()->query('SELECT p.*, c.name AS category_name FROM products p
+    LEFT JOIN categories c ON c.id = p.category_id ORDER BY c.sort_order,c.name,p.created_at,p.id')->fetchAll();
   return dd_json_out(['products' => array_map('dd_product_out', $rows)]);
 }
 
 function route_admin_products_post(array $req): array {
   dd_require_admin($req);
-  $p = dd_read_product_body(dd_body_json($req));
+  $body = dd_body_json($req);
+  $p = dd_read_product_body($body);
+  $category = dd_db()->prepare('SELECT id,name,active FROM categories WHERE id = ?');
+  $category->execute([$p['category_id']]);
+  $categoryRow = $category->fetch();
+  if (!$categoryRow || !(int) $categoryRow['active']) throw new DdHttpError(400, 'Choose an active product category');
+  $p['tag'] = $categoryRow['name'];
   $id = 'pr_' . base_convert((string) time(), 10, 36) . bin2hex(random_bytes(2));
-  dd_db()->prepare('INSERT INTO products (id,name,meta,tag,price,was,rating,stock,img,active) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    ->execute([$id, $p['name'], $p['meta'], $p['tag'], $p['price'], $p['was'], $p['rating'], $p['stock'], $p['img'], $p['active']]);
-  $stmt = dd_db()->prepare('SELECT * FROM products WHERE id = ?'); $stmt->execute([$id]);
+  dd_db()->prepare('INSERT INTO products (id,category_id,name,meta,tag,price,was,rating,stock,img,active) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    ->execute([$id, $p['category_id'], $p['name'], $p['meta'], $p['tag'], $p['price'], $p['was'], $p['rating'], $p['stock'], $p['img'], $p['active']]);
+  $stmt = dd_db()->prepare('SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.id = ?'); $stmt->execute([$id]);
   return dd_json_out(['product' => dd_product_out($stmt->fetch())], 201);
 }
 
@@ -297,8 +622,14 @@ function route_admin_products_put(array $req, string $id): array {
   $existing = $stmt->fetch();
   if (!$existing) throw new DdHttpError(404, 'Product not found');
   $p = dd_read_product_body(dd_body_json($req), $existing);
-  dd_db()->prepare('UPDATE products SET name=?,meta=?,tag=?,price=?,was=?,rating=?,stock=?,img=?,active=? WHERE id=?')
-    ->execute([$p['name'], $p['meta'], $p['tag'], $p['price'], $p['was'], $p['rating'], $p['stock'], $p['img'], $p['active'], $existing['id']]);
+  $category = dd_db()->prepare('SELECT id,name,active FROM categories WHERE id = ?');
+  $category->execute([$p['category_id']]);
+  $categoryRow = $category->fetch();
+  if (!$categoryRow || (!(int) $categoryRow['active'] && $p['active'])) throw new DdHttpError(400, 'Choose an active category for visible products');
+  $p['tag'] = $categoryRow['name'];
+  dd_db()->prepare('UPDATE products SET category_id=?,name=?,meta=?,tag=?,price=?,was=?,rating=?,stock=?,img=?,active=? WHERE id=?')
+    ->execute([$p['category_id'], $p['name'], $p['meta'], $p['tag'], $p['price'], $p['was'], $p['rating'], $p['stock'], $p['img'], $p['active'], $existing['id']]);
+  $stmt = dd_db()->prepare('SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.id = ?');
   $stmt->execute([$existing['id']]);
   return dd_json_out(['product' => dd_product_out($stmt->fetch())]);
 }
@@ -316,17 +647,61 @@ function route_admin_products_delete(array $req, string $id): array {
 
 function route_admin_customers(array $req): array {
   dd_require_admin($req);
-  $rows = dd_db()->query("SELECT u.id, u.name, u.email, u.phone, u.created_at,
+  $search = mb_substr(trim((string) (($req['query'] ?? [])['q'] ?? '')), 0, 100);
+  $filter = '';
+  $params = [];
+  if ($search !== '') {
+    $filter = ' AND (u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ? OR u.username LIKE ? OR CAST(u.id AS CHAR) LIKE ?)';
+    for ($i = 0; $i < 5; $i++) $params[] = '%' . $search . '%';
+  }
+  $stmt = dd_db()->prepare("SELECT u.id, u.name, u.email, u.phone, u.created_at,
+                                   COUNT(o.id) AS orders,
+                                   COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.total ELSE 0 END), 0) AS revenue,
+                                   MAX(o.created_at) AS last_order
+                            FROM users u LEFT JOIN orders o ON o.user_id = u.id
+                            WHERE u.role = 'user'$filter GROUP BY u.id ORDER BY revenue DESC, u.id");
+  $stmt->execute($params);
+  $rows = $stmt->fetchAll();
+  return dd_json_out(['customers' => $rows]);
+}
+
+function route_admin_customer_detail(array $req, string $id): array {
+  dd_require_admin($req);
+  $customer = dd_db()->prepare("SELECT u.id, u.name, u.username, u.email, u.phone, u.created_at,
+                                       COUNT(o.id) AS orders,
+                                       COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.total ELSE 0 END), 0) AS revenue,
+                                       MAX(o.created_at) AS last_order
+                                FROM users u LEFT JOIN orders o ON o.user_id = u.id
+                                WHERE u.id = ? AND u.role = 'user' GROUP BY u.id");
+  $customer->execute([(int) $id]);
+  $row = $customer->fetch();
+  if (!$row) throw new DdHttpError(404, 'Customer not found');
+  $orders = dd_db()->prepare("SELECT id, customer_name, phone, address, items_json, total, payment, coupon_code, discount, delivery_method, status, created_at
+                              FROM orders WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50");
+  $orders->execute([(int) $id]);
+  $history = $orders->fetchAll();
+  foreach ($history as &$order) {
+    $order['items'] = dd_parse_items($order['items_json'] ?? null);
+    unset($order['items_json']);
+  }
+  return dd_json_out(['customer' => $row, 'orders' => $history]);
+}
+
+function route_admin_customers_csv(array $req): array {
+  dd_require_admin($req);
+  $rows = dd_db()->query("SELECT u.id, u.name, u.username, u.email, u.phone, u.created_at,
                                  COUNT(o.id) AS orders,
-                                 COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.total ELSE 0 END), 0) AS revenue
+                                 COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.total ELSE 0 END), 0) AS revenue,
+                                 MAX(o.created_at) AS last_order
                           FROM users u LEFT JOIN orders o ON o.user_id = u.id
                           WHERE u.role = 'user' GROUP BY u.id ORDER BY revenue DESC, u.id")->fetchAll();
-  return dd_json_out(['customers' => $rows]);
+  $out = array_map(fn($c) => [$c['id'], $c['name'], $c['username'], $c['email'], $c['phone'], $c['created_at'], $c['orders'], $c['revenue'], $c['last_order']], $rows);
+  return dd_send_csv('customers.csv', ['ID','Name','Username','Email','Phone','Joined','Orders','Revenue','Last order'], $out);
 }
 
 function route_admin_inquiries(array $req): array {
   dd_require_admin($req);
-  $rows = dd_db()->query("SELECT * FROM inquiries ORDER BY datetime(created_at) DESC, id DESC LIMIT 100")->fetchAll();
+  $rows = dd_db()->query("SELECT * FROM inquiries ORDER BY created_at DESC, id DESC LIMIT 100")->fetchAll();
   return dd_json_out(['inquiries' => $rows]);
 }
 
@@ -360,79 +735,198 @@ function route_reviews_post(array $req, string $productId): array {
 }
 
 /* ════════════════ invoice ════════════════ */
+function dd_invoice_token_matches(?string $storedHash, string $token): bool {
+  return preg_match('/^[a-f0-9]{64}$/', $token) === 1
+    && $storedHash !== null
+    && $storedHash !== ''
+    && hash_equals($storedHash, hash('sha256', $token));
+}
+function dd_invoice_item_totals(array $items): array {
+  $subtotal = 0;
+  $itemsOut = [];
+  foreach ($items as $item) {
+    if (!is_array($item)) continue;
+    $price = max(0, (int) ($item['price'] ?? 0));
+    $qty = max(0, (int) ($item['qty'] ?? 0));
+    $lineTotal = $price * $qty;
+    $subtotal += $lineTotal;
+    $itemsOut[] = [
+      'id' => $item['id'] ?? null, 'name' => $item['name'] ?? '', 'category' => $item['category'] ?? '',
+      'price' => $price, 'qty' => $qty, 'lineTotal' => $lineTotal,
+    ];
+  }
+  return ['items' => $itemsOut, 'subtotal' => $subtotal];
+}
 function route_invoice(array $req, string $id): array {
-  $u = dd_require_auth($req);
+  $u = dd_current_user($req);
+  $rawToken = (($req['query'] ?? [])['token'] ?? '');
+  $token = is_string($rawToken) ? $rawToken : '';
   if (!ctype_digit($id)) throw new DdHttpError(404, 'Invoice not found');
-  $stmt = dd_db()->prepare('SELECT * FROM orders WHERE id = ?');
+  $stmt = dd_db()->prepare('SELECT o.*, u.email AS customer_email FROM orders o LEFT JOIN users u ON u.id = o.user_id WHERE o.id = ?');
   $stmt->execute([(int) $id]);
   $o = $stmt->fetch();
   if (!$o) throw new DdHttpError(404, 'Invoice not found');
-  if ((int) ($o['user_id'] ?? 0) !== (int) $u['id'] && ($u['role'] ?? '') !== 'admin') {
-    throw new DdHttpError(403, 'Not your invoice');
+  $isOwner = $u && (int) ($o['user_id'] ?? 0) === (int) $u['id'];
+  $isAdmin = $u && ($u['role'] ?? '') === 'admin';
+  $hasValidToken = dd_invoice_token_matches($o['invoice_token_hash'] ?? null, $token);
+  if (!$isOwner && !$isAdmin && !$hasValidToken) {
+    throw new DdHttpError($u ? 403 : 401, $u ? 'Not your order bill' : 'Sign in or use the order bill link to continue');
   }
-  $items = dd_parse_items($o['items_json'] ?? null);
-  $subtotal = 0;
-  $itemsOut = [];
-  foreach ($items as $i) {
-    $price = (int) ($i['price'] ?? 0);
-    $qty = (int) ($i['qty'] ?? 0);
-    $subtotal += $price * $qty;
-    $itemsOut[] = ['id' => $i['id'] ?? null, 'name' => $i['name'] ?? '', 'price' => $price, 'qty' => $qty, 'lineTotal' => $price * $qty];
-  }
+  $billLines = dd_invoice_item_totals(dd_parse_items($o['items_json'] ?? null));
+  $itemsOut = $billLines['items'];
+  $subtotal = $billLines['subtotal'];
   $discount = (int) ($o['discount'] ?? 0);
   $delivery = max(0, (int) $o['total'] - $subtotal + $discount);
-  $gst = (int) round((int) $o['total'] * 18 / 118);
   return dd_json_out([
     'invoice' => [
-      'id' => (int) $o['id'], 'createdAt' => $o['created_at'], 'status' => $o['status'],
-      'customer' => ['name' => $o['customer_name'], 'phone' => $o['phone'], 'address' => $o['address']],
+      'id' => (int) $o['id'], 'invoiceNumber' => 'INV-' . str_pad((string) $o['id'], 6, '0', STR_PAD_LEFT),
+      'createdAt' => $o['created_at'], 'status' => $o['status'],
+      'customer' => ['name' => $o['customer_name'], 'phone' => $o['phone'], 'email' => $o['customer_email'] ?? '', 'address' => $o['address']],
       'items' => $itemsOut,
       'subtotal' => $subtotal, 'discount' => $discount, 'delivery' => $delivery,
-      'total' => (int) $o['total'], 'gstIncluded' => $gst,
+      'total' => (int) $o['total'],
       'payment' => $o['payment'] ?: 'cod', 'coupon' => $o['coupon_code'] ?: '',
     ],
     'seller' => dd_seller_info(),
   ]);
 }
 
-/* ════════════════ admin report (last 14 days + 30-day breakdown) ════════════════ */
-function route_admin_report(array $req): array {
-  dd_require_admin($req);
-  $days = [];
-  for ($i = 13; $i >= 0; $i--) {
-    $key = gmdate('Y-m-d', time() - $i * 86400);
-    $stmt = dd_db()->prepare("SELECT COUNT(*) AS orders, COALESCE(SUM(total),0) AS revenue FROM orders WHERE status != 'cancelled' AND date(created_at) = date(?)");
-    $stmt->execute([$key]);
-    $row = $stmt->fetch();
-    $days[] = ['date' => $key, 'orders' => (int) $row['orders'], 'revenue' => (int) $row['revenue']];
+/* ════════════════ admin reports ════════════════ */
+function dd_report_period(array $query, ?string $today = null): array {
+  $today = $today ?? (string) dd_db()->query('SELECT CURDATE()')->fetchColumn();
+  $rawFrom = $query['from'] ?? '';
+  $rawTo = $query['to'] ?? '';
+  if (!is_string($rawFrom) || !is_string($rawTo)) throw new DdHttpError(400, 'Report dates must be single date values');
+  $from = trim($rawFrom);
+  $to = trim($rawTo);
+  foreach (['from' => $from, 'to' => $to] as $label => $date) {
+    if ($date !== '') {
+      $parsed = preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? DateTimeImmutable::createFromFormat('!Y-m-d', $date) : false;
+      if (!$parsed || $parsed->format('Y-m-d') !== $date) throw new DdHttpError(400, "Invalid $label date");
+    }
   }
-  $recent = dd_db()->query("SELECT items_json, total, payment, coupon_code, discount, status FROM orders
-                            WHERE status != 'cancelled' AND datetime(created_at) >= datetime('now','-30 days')")->fetchAll();
+  if ($from === '' && $to === '') {
+    $to = $today;
+    $from = (new DateTimeImmutable($today))->modify('-29 days')->format('Y-m-d');
+  } elseif ($from === '') {
+    $from = (new DateTimeImmutable($to))->modify('-29 days')->format('Y-m-d');
+  } elseif ($to === '') {
+    $to = $today;
+  }
+  if ($from > $to) throw new DdHttpError(400, 'Start date must be on or before end date');
+  $span = (int) (new DateTimeImmutable($from))->diff(new DateTimeImmutable($to))->format('%a') + 1;
+  if ($span > 90) throw new DdHttpError(400, 'Report date range cannot exceed 90 days');
+  return [$from, $to, $span];
+}
+
+function dd_product_category_names(): array {
+  $products = [];
+  $categories = [];
+  foreach (dd_db()->query('SELECT p.id,p.category_id,p.tag,c.name AS category_name FROM products p
+    LEFT JOIN categories c ON c.id=p.category_id')->fetchAll() as $row) {
+    $name = (string) ($row['category_name'] ?? $row['tag'] ?? 'Uncategorized');
+    $products[(string) $row['id']] = $name;
+    if ($row['category_id'] !== null) $categories[(string) $row['category_id']] = $name;
+  }
+  return ['products' => $products, 'categories' => $categories];
+}
+
+function dd_build_admin_report(string $from, string $to, int $span): array {
+  $db = dd_db();
+  $range = $db->prepare('SELECT id,items_json,total,payment,coupon_code,discount,status,created_at
+    FROM orders WHERE created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)
+    ORDER BY created_at,id');
+  $range->execute([$from, $to]);
+  $orders = $range->fetchAll();
+  $categoryNames = dd_product_category_names();
+
+  $days = [];
+  $start = new DateTimeImmutable($from);
+  for ($i = 0; $i < $span; $i++) {
+    $key = $start->modify("+$i days")->format('Y-m-d');
+    $days[$key] = ['date' => $key, 'orders' => 0, 'revenue' => 0];
+  }
   $byProduct = [];
-  $cod = 0; $upi = 0; $codRev = 0; $upiRev = 0; $couponOrders = 0; $couponSaved = 0; $units = 0;
-  foreach ($recent as $o) {
-    $tot = (int) $o['total'];
-    if (($o['payment'] ?? '') === 'upi') { $upi++; $upiRev += $tot; } else { $cod++; $codRev += $tot; }
+  $byCategory = [];
+  $cod = 0; $upi = 0; $codRevenue = 0; $upiRevenue = 0;
+  $couponOrders = 0; $couponSaved = 0; $units = 0; $grossSales = 0;
+  $cancelled = 0; $open = 0; $salesOrders = 0;
+  foreach ($orders as $o) {
+    $key = substr((string) $o['created_at'], 0, 10);
+    if (($o['status'] ?? '') === 'cancelled') { $cancelled++; continue; }
+    if (isset($days[$key])) {
+      $days[$key]['orders']++;
+      $days[$key]['revenue'] += (int) $o['total'];
+    }
+    $salesOrders++;
+    $grossSales += (int) $o['total'];
+    if (!in_array($o['status'], ['delivered', 'cancelled'], true)) $open++;
+    if (($o['payment'] ?? '') === 'upi') { $upi++; $upiRevenue += (int) $o['total']; }
+    else { $cod++; $codRevenue += (int) $o['total']; }
     if (!empty($o['coupon_code'])) { $couponOrders++; $couponSaved += (int) ($o['discount'] ?? 0); }
     foreach (dd_parse_items($o['items_json'] ?? null) as $it) {
+      if (!is_array($it)) continue;
       $pid = (string) ($it['id'] ?? '');
-      $qty = (int) ($it['qty'] ?? 0);
-      $price = (int) ($it['price'] ?? 0);
-      if (!isset($byProduct[$pid])) $byProduct[$pid] = ['id' => $pid, 'name' => (string) ($it['name'] ?? ''), 'units' => 0, 'revenue' => 0];
+      $qty = max(0, (int) ($it['qty'] ?? 0));
+      $price = max(0, (int) ($it['price'] ?? 0));
+      $productName = (string) ($it['name'] ?? $pid ?: 'Product');
+      $categoryId = (string) ($it['category_id'] ?? '');
+      $category = $categoryNames['categories'][$categoryId]
+        ?? (trim((string) ($it['category'] ?? '')) ?: ($categoryNames['products'][$pid] ?? 'Uncategorized'));
+      if (!isset($byProduct[$pid])) $byProduct[$pid] = ['id' => $pid, 'name' => $productName, 'units' => 0, 'revenue' => 0];
       $byProduct[$pid]['units'] += $qty;
       $byProduct[$pid]['revenue'] += $price * $qty;
+      if (!isset($byCategory[$category])) $byCategory[$category] = ['name' => $category, 'units' => 0, 'revenue' => 0];
+      $byCategory[$category]['units'] += $qty;
+      $byCategory[$category]['revenue'] += $price * $qty;
       $units += $qty;
     }
   }
-  usort($byProduct, fn($a, $b) => $b['units'] <=> $a['units']);
-  $topProducts = array_slice($byProduct, 0, 5);
-  $allTime = dd_db()->query("SELECT COALESCE(AVG(total),0) AS aov, COUNT(*) AS orders FROM orders WHERE status != 'cancelled'")->fetch();
-  return dd_json_out([
-    'days' => $days, 'topProducts' => $topProducts,
-    'payment' => ['cod' => $cod, 'upi' => $upi, 'codRevenue' => $codRev, 'upiRevenue' => $upiRev],
-    'coupons' => ['orders' => $couponOrders, 'saved' => $couponSaved],
-    'units30d' => $units, 'aov' => (int) round((float) $allTime['aov']), 'ordersAllTime' => (int) $allTime['orders'],
-  ]);
+  usort($byProduct, fn($a, $b) => $b['revenue'] <=> $a['revenue']);
+  usort($byCategory, fn($a, $b) => $b['revenue'] <=> $a['revenue']);
+  $itemSales = array_sum(array_column($byCategory, 'revenue'));
+  $allTime = $db->query("SELECT COUNT(*) AS orders FROM orders")->fetch();
+  return [
+    'from' => $from, 'to' => $to, 'days' => array_values($days), 'topProducts' => array_slice($byProduct, 0, 10),
+    'categories' => array_values($byCategory), 'payment' => ['cod' => $cod, 'upi' => $upi, 'codRevenue' => $codRevenue, 'upiRevenue' => $upiRevenue],
+    'coupons' => ['orders' => $couponOrders, 'saved' => $couponSaved], 'units' => $units,
+    'grossSales' => $grossSales, 'itemSales' => $itemSales, 'orders' => $salesOrders, 'cancelled' => $cancelled, 'open' => $open,
+    'aov' => $salesOrders ? (int) round($grossSales / $salesOrders) : 0, 'ordersAllTime' => (int) $allTime['orders'],
+  ];
+}
+function route_admin_report(array $req): array {
+  dd_require_admin($req);
+  [$from, $to, $span] = dd_report_period($req['query'] ?? []);
+  return dd_json_out(dd_build_admin_report($from, $to, $span));
+}
+function route_admin_report_csv(array $req): array {
+  dd_require_admin($req);
+  [$from, $to] = dd_report_period($req['query'] ?? []);
+  $categoryNames = dd_product_category_names();
+  $stmt = dd_db()->prepare('SELECT id,created_at,customer_name,phone,items_json,total,payment,coupon_code,discount,status
+    FROM orders WHERE created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)
+    ORDER BY created_at,id');
+  $stmt->execute([$from, $to]);
+  $rows = [];
+  foreach ($stmt->fetchAll() as $order) {
+    if (($order['status'] ?? '') === 'cancelled') continue;
+    foreach (dd_parse_items($order['items_json'] ?? null) as $item) {
+      if (!is_array($item)) continue;
+      $qty = max(0, (int) ($item['qty'] ?? 0));
+      $price = max(0, (int) ($item['price'] ?? 0));
+      $categoryId = (string) ($item['category_id'] ?? '');
+      $category = $categoryNames['categories'][$categoryId]
+        ?? (trim((string) ($item['category'] ?? '')) ?: ($categoryNames['products'][(string) ($item['id'] ?? '')] ?? 'Uncategorized'));
+      $rows[] = [
+        $order['id'], $order['created_at'], $order['customer_name'], $order['phone'],
+        $item['id'] ?? '', $item['name'] ?? '', $category,
+        $qty, $price, $qty * $price, (int) $order['total'], $order['payment'],
+        $order['coupon_code'], (int) $order['discount'], $order['status'],
+      ];
+    }
+  }
+  return dd_send_csv('sales-report-' . $from . '-to-' . $to . '.csv',
+    ['Order','Placed','Customer','Phone','Product ID','Product','Category','Units','Unit price','Line sales','Order total','Payment','Coupon','Discount','Status'], $rows);
 }
 
 /* ════════════════ admin storefront config ════════════════ */
@@ -517,96 +1011,102 @@ function route_admin_coupons_delete(array $req, string $code): array {
 
 /* ════════════════ setup wizard ════════════════ */
 function route_setup_status(array $req): array {
+  $install = dd_read_install();
+  if (!isset($install['database']) || !is_array($install['database'])) {
+    return dd_json_out(['installed' => false, 'configured' => false, 'engine' => 'MySQL / MariaDB']);
+  }
   $installed = dd_is_setup_complete();
   $u = dd_current_user($req);
   if ($installed && (!$u || ($u['role'] ?? '') !== 'admin')) return dd_json_out(['installed' => true]);
   return dd_json_out(array_merge(
-    ['installed' => $installed,
+    ['installed' => $installed, 'configured' => true,
      'completedAt' => dd_site_get('setup_completed_at') ?: null,
      'signedInAs' => $u ? ['name' => $u['name'], 'role' => $u['role']] : null],
     dd_db_info(),
-    ['settings' => dd_site_settings(), 'store' => dd_store_config()]
+    ['settings' => dd_site_settings(), 'store' => dd_store_config(),
+     'smtp' => ['configured' => !empty(($install['smtp']['email'] ?? '')) && !empty(($install['smtp']['password'] ?? '')),
+                'email' => (string) ($install['smtp']['email'] ?? '')]]
   ));
 }
 
 function route_setup_test_db(array $req): array {
-  dd_require_setup_open(dd_current_user($req));
+  $saved = dd_read_install();
+  $current = isset($saved['database']) && is_array($saved['database']) ? dd_current_user($req) : null;
+  dd_require_setup_open($current);
   $b = dd_body_json($req);
-  $target = dd_resolve_db_target($b['path'] ?? null);
-  $existed = file_exists($target);
-  @mkdir(dirname($target), 0775, true);
-  $test = null;
+  $config = dd_mysql_config(array_merge(is_array($saved['database'] ?? null) ? $saved['database'] : [], $b));
+  $databaseMode = (string) ($b['databaseMode'] ?? 'existing');
+  if (!in_array($databaseMode, ['create', 'existing'], true)) throw new DdHttpError(400, 'Choose whether to create or connect to a database');
+  if ($databaseMode === 'create') {
+    try {
+      $test = dd_mysql_connect_server($config);
+      $stmt = $test->prepare('SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?');
+      $stmt->execute([$config['database']]);
+      if ((int) $stmt->fetchColumn() > 0) {
+        throw new DdHttpError(409, 'That database already exists. Choose “Connect to an existing database” instead.');
+      }
+      return dd_json_out(['ok' => true, 'host' => $config['host'], 'database' => $config['database'], 'databaseExists' => false, 'counts' => null]);
+    } catch (DdHttpError $e) {
+      throw $e;
+    } catch (Throwable $e) {
+      error_log('[setup] MySQL server connection test failed: ' . $e->getMessage());
+      throw new DdHttpError(400, 'MySQL server connection failed. Check the host, port, username, password, and MySQL service.');
+    }
+  }
   try {
-    $test = new PDO('sqlite:' . $target, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-    $integ = (string) $test->query('PRAGMA integrity_check')->fetchColumn();
-    $has = function (string $t) use ($test): bool {
-      $stmt = $test->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?");
-      $stmt->execute([$t]);
-      return (bool) $stmt->fetch();
-    };
+    $test = dd_mysql_connect($config);
     $counts = null;
-    if ($has('users') && $has('products')) {
+    $stmt = $test->prepare("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name IN ('users','products','orders')");
+    $stmt->execute([$config['database']]);
+    if ((int) $stmt->fetchColumn() === 3) {
       $counts = [
-        'users'    => (int) $test->query('SELECT COUNT(*) n FROM users')->fetch()['n'],
-        'products' => (int) $test->query('SELECT COUNT(*) n FROM products')->fetch()['n'],
-        'orders'   => (int) $test->query('SELECT COUNT(*) n FROM orders')->fetch()['n'],
+        'users'    => (int) $test->query('SELECT COUNT(*) FROM users')->fetchColumn(),
+        'products' => (int) $test->query('SELECT COUNT(*) FROM products')->fetchColumn(),
+        'orders'   => (int) $test->query('SELECT COUNT(*) FROM orders')->fetchColumn(),
       ];
     }
-    $test = null;
-    if (!$existed) @unlink($target);
-    return dd_json_out(['ok' => true, 'path' => $target, 'existed' => $existed, 'counts' => $counts, 'integrity' => $integ]);
+    return dd_json_out(['ok' => true, 'host' => $config['host'], 'database' => $config['database'], 'counts' => $counts]);
   } catch (Throwable $e) {
-    $test = null;
-    if (!$existed) @unlink($target);
-    throw new DdHttpError(400, "Can't use that file as the site database: " . $e->getMessage());
+    error_log('[setup] MySQL connection test failed: ' . $e->getMessage());
+    throw new DdHttpError(400, 'MySQL connection failed. Check the host, database name, port, username, password, and MySQL service.');
   }
 }
 
 function route_setup_database(array $req): array {
-  dd_require_setup_open(dd_current_user($req));
+  $previous = dd_read_install();
+  $current = isset($previous['database']) && is_array($previous['database']) ? dd_current_user($req) : null;
+  dd_require_setup_open($current);
   $b = dd_body_json($req);
   $mode = (($b['mode'] ?? 'demo') === 'empty') ? 'empty' : 'demo';
-  $confirmReset = dd_boolish($b['confirmReset'] ?? false) === '1';
-  $target = dd_resolve_db_target($b['path'] ?? null);
-  $sameFile = $target === dd_db_path();
-
-  $countsNow = dd_db_counts();
-  $nNow = $countsNow['users'] + $countsNow['products'];
-
-  if ($sameFile) {
-    if ($nNow > 0 && $mode === 'empty' && !$confirmReset) {
-      return dd_json_out(['error' => 'That database already holds data — tick “erase existing data” to wipe and reinstall.',
-                          'needsReset' => true, 'counts' => $countsNow], 409);
+  $config = dd_mysql_config(array_merge(is_array($previous['database'] ?? null) ? $previous['database'] : [], $b));
+  $databaseMode = (string) ($b['databaseMode'] ?? 'existing');
+  if (!in_array($databaseMode, ['create', 'existing'], true)) throw new DdHttpError(400, 'Choose whether to create or connect to a database');
+  $created = false;
+  if ($databaseMode === 'create') {
+    try {
+      $server = dd_mysql_connect_server($config);
+      $stmt = $server->prepare('SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?');
+      $stmt->execute([$config['database']]);
+      if ((int) $stmt->fetchColumn() > 0) {
+        throw new DdHttpError(409, 'That database already exists. Choose “Connect to an existing database” instead.');
+      }
+      $server->exec('CREATE DATABASE `' . $config['database'] . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+      $created = true;
+    } catch (DdHttpError $e) {
+      throw $e;
+    } catch (Throwable $e) {
+      error_log('[setup] Database creation failed: ' . $e->getMessage());
+      throw new DdHttpError(400, 'Could not create the database. Check that the MySQL user has CREATE DATABASE permission and try again.');
     }
-    if ($nNow > 0 && $confirmReset) dd_wipe_all_tables();
-    if ($nNow === 0 || $confirmReset) dd_seed_database($mode === 'demo');
-    return dd_json_out(['ok' => true, 'path' => dd_db_path(),
-                        'seeded' => ($nNow === 0 || $confirmReset) ? $mode : 'kept-existing', 'counts' => dd_db_counts()]);
-  }
-
-  @mkdir(dirname($target), 0775, true);
-  $test = new PDO('sqlite:' . $target, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-  $had = false;
-  $n = 0;
-  try {
-    $had = (bool) $test->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'users'")->fetch();
-    if ($had) {
-      try {
-        $n = (int) $test->query('SELECT COUNT(*) n FROM users')->fetch()['n'] + (int) $test->query('SELECT COUNT(*) n FROM products')->fetch()['n'];
-      } catch (Throwable $e) {}
-    }
-  } finally { $test = null; }
-  if ($n > 0 && $mode === 'empty' && !$confirmReset) {
-    return dd_json_out(['error' => 'That database already holds data — tick “erase existing data” to wipe and reinstall.',
-                        'needsReset' => true, 'counts' => null], 409);
   }
   DdDb::close();
-  DdDb::open($target);
-  if ($n > 0) dd_wipe_all_tables();
-  if ($n === 0 || $confirmReset) dd_seed_database($mode === 'demo');
-  dd_write_install(['dbPath' => $target]);
-  return dd_json_out(['ok' => true, 'path' => $target,
-                      'seeded' => ($n === 0 || $confirmReset) ? $mode : 'kept-existing', 'counts' => dd_db_counts()]);
+  DdDb::open($config);
+  $previous['database'] = $config;
+  dd_write_install($previous);
+  $counts = dd_db_info()['counts'];
+  $hasData = ($counts['users'] + $counts['products']) > 0;
+  if (!$hasData) dd_seed_database($mode === 'demo');
+  return dd_json_out(['ok' => true, 'created' => $created, 'seeded' => $hasData ? 'kept-existing' : $mode, 'counts' => dd_db_info()['counts']]);
 }
 
 function route_setup_site(array $req): array {
@@ -632,27 +1132,34 @@ function route_setup_admin(array $req): array {
   $b = dd_body_json($req);
   $name = mb_substr(trim((string) ($b['name'] ?? '')), 0, 80);
   if ($name === '') $name = 'Site Admin';
+  $username = strtolower(trim((string) ($b['username'] ?? '')));
   $email = mb_substr(strtolower(trim((string) ($b['email'] ?? ''))), 0, 120);
   $password = (string) ($b['password'] ?? '');
   $phone = mb_substr(trim((string) ($b['phone'] ?? '')), 0, 32);
   if (!dd_email_ok($email)) throw new DdHttpError(400, 'Enter a valid admin email');
+  if (!preg_match('/^[a-z0-9._-]{3,32}$/', $username)) throw new DdHttpError(400, 'Username must be 3–32 characters: letters, numbers, dot, underscore or hyphen');
   if (strlen($password) < 8) throw new DdHttpError(400, 'Password must be at least 8 characters');
-  if (strlen($password) > 100) throw new DdHttpError(400, 'Password too long');
+  if (strlen($password) > 72) throw new DdHttpError(400, 'Password must be 72 bytes or fewer');
   $pair = dd_password_pair($password);
   $hash = $pair['hash'];
-  $existing = dd_db()->prepare('SELECT id FROM users WHERE email = ?'); $existing->execute([$email]);
-  $row = $existing->fetch();
+  $existing = dd_db()->prepare('SELECT id,email,username FROM users WHERE email = ? OR username = ?'); $existing->execute([$email, $username]);
+  $matches = $existing->fetchAll();
+  if (count($matches) > 1) throw new DdHttpError(409, 'That email and username belong to different accounts');
+  $row = $matches[0] ?? null;
+  $updated = (bool) $row;
   $cookies = dd_parse_cookies($req['headers']['cookie'] ?? null);
   $sid = (string) ($cookies['dd_sid'] ?? '');
   if ($row) {
-    dd_db()->prepare("UPDATE users SET name=?, phone=?, password_hash=?, password_salt=?, role='admin' WHERE id=?")
-      ->execute([$name, $phone, $hash, $pair['salt'], $row['id']]);
+    dd_db()->prepare("UPDATE users SET name=?, username=?, email=?, phone=?, password_hash=?, password_salt=?, role='admin' WHERE id=?")
+      ->execute([$name, $username, $email, $phone, $hash, $pair['salt'], $row['id']]);
     dd_db()->prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?')->execute([$row['id'], $sid]);
   } else {
-    dd_db()->prepare("INSERT INTO users (name,email,phone,password_hash,password_salt,role) VALUES (?,?,?,?,?, 'admin')")
-      ->execute([$name, $email, $phone, $hash, $pair['salt']]);
+    dd_db()->prepare("INSERT INTO users (name,username,email,phone,password_hash,password_salt,role) VALUES (?,?,?,?,?,?, 'admin')")
+      ->execute([$name, $username, $email, $phone, $hash, $pair['salt']]);
+    $row = ['id' => dd_db()->lastInsertId()];
   }
-  return dd_json_out(['ok' => true, 'email' => $email, 'updated' => (bool) $row]);
+  dd_create_session($req, (int) $row['id']);
+  return dd_json_out(['ok' => true, 'email' => $email, 'updated' => $updated]);
 }
 
 function route_setup_store(array $req): array {
@@ -673,60 +1180,14 @@ function route_setup_store(array $req): array {
 
 function route_setup_complete(array $req): array {
   dd_require_setup_open(dd_current_user($req));
+  $smtp = dd_smtp_settings();
+  if (empty($smtp['email']) || empty($smtp['password'])) throw new DdHttpError(400, 'Configure Gmail SMTP before completing setup.');
+  $admins = (int) dd_db()->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn();
+  if ($admins < 1) throw new DdHttpError(400, 'Create your admin account before completing setup.');
   dd_set_setting('setup_completed', '1');
   dd_set_setting('setup_completed_at', gmdate('c'));
   return dd_json_out(['ok' => true]);
 }
-
-/* ════════════════ backup & restore (SQLite) ════════════════ */
-function route_admin_backup(array $req): array {
-  dd_require_admin($req);
-  $tmp = tempnam(sys_get_temp_dir(), 'mysite-backup-');
-  if ($tmp === false) throw new DdHttpError(500, 'Backup failed: could not create a temp file');
-  @unlink($tmp); // VACUUM INTO requires the target to not exist
-  $tmpDb = $tmp . '.db';
-  try {
-    dd_db()->exec("VACUUM INTO " . dd_db()->quote($tmpDb));
-  } catch (Throwable $e) {
-    @unlink($tmpDb);
-    throw new DdHttpError(500, 'Backup failed: ' . $e->getMessage());
-  }
-  $data = file_get_contents($tmpDb);
-  @unlink($tmpDb);
-  $name = 'mysite-backup-' . gmdate('Y-m-d') . '.db';
-  return ['status' => 200,
-          'headers' => ['Content-Disposition' => "attachment; filename=\"$name\"", 'Cache-Control' => 'no-store'],
-          'body' => $data, 'content_type' => 'application/octet-stream'];
-}
-
-function route_admin_restore(array $req): array {
-  dd_require_admin($req);
-  $raw = (string) ($req['raw'] ?? '');
-  if (strlen($raw) < 100) throw new DdHttpError(400, 'Empty or unreadable upload — pick the .db backup file.');
-  if (substr($raw, 0, 16) !== "SQLite format 3\0") throw new DdHttpError(400, 'That file is not a SQLite database.');
-  $target = dd_db_path();
-  $backup = $target . '.bak-' . time();
-  if (!@copy($target, $backup)) throw new DdHttpError(500, 'Could not snapshot the current database first.');
-  DdDb::close();
-  $tmpFile = $target . '.restore-tmp';
-  file_put_contents($tmpFile, $raw);
-  try {
-    $test = new PDO('sqlite:' . $tmpFile, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-    $integ = (string) $test->query('PRAGMA integrity_check')->fetchColumn();
-    $ok = (bool) $test->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'users'")->fetch();
-    $test = null;
-    if (!$ok || $integ !== 'ok') throw new Exception('missing required schema or failed integrity check');
-    rename($tmpFile, $target);
-  } catch (Throwable $e) {
-    @copy($backup, $target);
-    @unlink($tmpFile);
-    DdDb::open($target);
-    throw new DdHttpError(400, 'Restore rolled back — ' . $e->getMessage());
-  }
-  DdDb::open($target);
-  return dd_json_out(['ok' => true, 'counts' => dd_db_counts(), 'backup' => basename($backup)]);
-}
-
 
 /* ════════════════ addresses (address book) ════════════════ */
 function dd_address_out(array $a): array {
@@ -747,6 +1208,10 @@ function dd_normalize_address(array $b, array $existing = []): array {
     'is_default' => (bool) ($pick('is_default', false)),
   ];
   if ($a['name'] === '') throw new DdHttpError(400, 'Add a recipient name');
+  if (mb_strlen($a['name']) > 120 || mb_strlen($a['phone']) > 32 || mb_strlen($a['line']) > 255 ||
+      mb_strlen($a['city']) > 100 || mb_strlen($a['state']) > 100 || mb_strlen($a['pincode']) > 20) {
+    throw new DdHttpError(400, 'One or more address fields exceed their maximum length');
+  }
   if (strlen(preg_replace('/\D/', '', $a['phone'])) < 10) throw new DdHttpError(400, 'Enter a valid 10-digit phone');
   if (mb_strlen($a['line']) < 6) throw new DdHttpError(400, 'Enter the full address line');
   if (!preg_match('/^\d{6}$/', $a['pincode'])) throw new DdHttpError(400, 'Enter a valid 6-digit PIN code');
@@ -818,7 +1283,8 @@ function route_me_password(array $req): array {
   $current = (string) ($b['currentPassword'] ?? '');
   $new = (string) ($b['newPassword'] ?? '');
   if ($current === '') throw new DdHttpError(400, 'Enter your current password');
-  if (strlen($new) < 6) throw new DdHttpError(400, 'New password must be at least 6 characters');
+  if (strlen($new) < 8) throw new DdHttpError(400, 'New password must be at least 8 characters');
+  if (strlen($new) > 72) throw new DdHttpError(400, 'Password must be 72 bytes or fewer');
   $row = dd_db()->prepare('SELECT * FROM users WHERE id = ?'); $row->execute([$u['id']]);
   $user = $row->fetch();
   if (!$user || !dd_verify_password($current, $user)) throw new DdHttpError(403, 'Current password is incorrect');
@@ -831,26 +1297,30 @@ function route_me_password(array $req): array {
 function route_my_order_cancel(array $req, string $id): array {
   $u = dd_require_auth($req);
   $db = dd_db();
-  $stmt = $db->prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?'); $stmt->execute([(int) $id, $u['id']]);
-  $o = $stmt->fetch();
-  if (!$o) throw new DdHttpError(404, 'Order not found');
-  if (!in_array($o['status'], ['pending', 'confirmed'], true)) {
-    throw new DdHttpError(409, "This order can no longer be cancelled — it is {$o['status']}. Chat on WhatsApp and we'll do our best.");
-  }
-  $items = dd_parse_items($o['items_json'] ?? null);
   $db->beginTransaction();
   try {
+    $stmt = $db->prepare('SELECT * FROM orders WHERE id = ? AND user_id = ? FOR UPDATE');
+    $stmt->execute([(int) $id, $u['id']]);
+    $o = $stmt->fetch();
+    if (!$o) throw new DdHttpError(404, 'Order not found');
+    if (!in_array($o['status'], ['pending', 'confirmed'], true)) {
+      throw new DdHttpError(409, "This order can no longer be cancelled — it is {$o['status']}. Chat on WhatsApp and we'll do our best.");
+    }
+    $items = dd_parse_items($o['items_json'] ?? null);
     $db->prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?")->execute([$o['id']]);
-    $inc = $db->prepare('UPDATE products SET stock = stock + ? WHERE id = ?');
+    $inc = $db->prepare('UPDATE products SET stock = LEAST(2147483647, stock + ?) WHERE id = ?');
     foreach ($items as $it) {
       if (!is_array($it) || empty($it['id'])) continue;
       $inc->execute([max(1, (int) ($it['qty'] ?? 1)), $it['id']]);
     }
     if (($o['coupon_code'] ?? '') !== '') {
-      $db->prepare('UPDATE coupons SET used = MAX(0, used - 1) WHERE code = ?')->execute([$o['coupon_code']]);
+      $db->prepare('UPDATE coupons SET used = GREATEST(0, used - 1) WHERE code = ?')->execute([$o['coupon_code']]);
     }
     $db->commit();
-  } catch (Throwable $e) { $db->rollBack(); throw $e; }
+  } catch (Throwable $e) {
+    if ($db->inTransaction()) $db->rollBack();
+    throw $e;
+  }
   return dd_json_out(['ok' => true, 'status' => 'cancelled']);
 }
 
@@ -865,6 +1335,7 @@ function route_coupons_offers(array $req): array {
 /* ════════════════ admin · CSV exports ════════════════ */
 function dd_csv_cell($v): string {
   $s = (string) ($v ?? '');
+  if (preg_match('/^\s*[=+\-@]/', $s)) $s = "'" . $s;
   return preg_match('/[",\n\r]/', $s) ? '"' . str_replace('"', '""', $s) . '"' : $s;
 }
 function dd_send_csv(string $filename, array $header, array $rows): array {
@@ -872,7 +1343,7 @@ function dd_send_csv(string $filename, array $header, array $rows): array {
   foreach ($rows as $r) $lines[] = implode(',', array_map('dd_csv_cell', $r));
   $body = "\xEF\xBB\xBF" . implode("\r\n", $lines);
   return ['status' => 200,
-          'headers' => ['Content-Disposition' => 'attachment; filename="' . $filename . '"'],
+          'headers' => ['Content-Disposition' => 'attachment; filename="' . $filename . '"', 'Cache-Control' => 'private, no-store'],
           'body' => $body,
           'content_type' => 'text/csv; charset=utf-8'];
 }
@@ -884,7 +1355,7 @@ function route_admin_orders_csv(array $req): array {
   $to = trim((string) ($q2['to'] ?? ''));
   $q = strtolower(trim((string) ($q2['q'] ?? '')));
   $stmt = dd_db()->prepare("SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id = o.user_id
-                            ORDER BY datetime(o.created_at) DESC, o.id DESC LIMIT 5000");
+                            ORDER BY o.created_at DESC, o.id DESC LIMIT 5000");
   $stmt->execute();
   $rows = $stmt->fetchAll();
   $rows = array_filter($rows, function ($o) use ($status, $from, $to, $q) {
@@ -893,7 +1364,7 @@ function route_admin_orders_csv(array $req): array {
     if ($from !== '' && $d < $from) return false;
     if ($to !== '' && $d > $to) return false;
     if ($q !== '') {
-      $hay = strtolower(implode(' ', [$o['id'], $o['customer_name'], $o['phone'], $o['user_email'] ?? '', $o['coupon_code'] ?? '', $o['address'] ?? '']));
+      $hay = strtolower(implode(' ', [$o['id'], $o['customer_name'], $o['phone'], $o['user_email'] ?? '', $o['coupon_code'] ?? '', $o['address'] ?? '', $o['note'] ?? '', $o['items_json'] ?? '']));
       if (strpos($hay, $q) === false) return false;
     }
     return true;
@@ -914,14 +1385,17 @@ function route_admin_orders_csv(array $req): array {
 }
 function route_admin_products_csv(array $req): array {
   dd_require_admin($req);
-  $stmt = dd_db()->prepare('SELECT * FROM products ORDER BY created_at, id');
+  $stmt = dd_db()->prepare('SELECT p.*, c.name AS category_name FROM products p
+    LEFT JOIN categories c ON c.id=p.category_id ORDER BY c.sort_order,c.name,p.created_at,p.id');
   $stmt->execute();
   $rows = $stmt->fetchAll();
   $out = [];
   foreach ($rows as $pr) {
-    $out[] = [$pr['id'], $pr['name'], $pr['tag'], (int) $pr['price'], (int) $pr['was'], (float) $pr['rating'], (int) $pr['stock'], ((int) $pr['active']) ? 'yes' : 'no', (int) ($pr['reviews'] ?? 0)];
+    $out[] = [$pr['id'], $pr['name'], $pr['meta'], $pr['category_id'], $pr['category_name'] ?? $pr['tag'],
+      (int) $pr['price'], (int) $pr['was'], (float) $pr['rating'], (int) $pr['stock'], $pr['img'],
+      ((int) $pr['active']) ? 'yes' : 'no', (int) ($pr['reviews'] ?? 0)];
   }
-  return dd_send_csv('products.csv', ['ID','Name','Tag','Price','MRP','Rating','Stock','Active','Reviews'], $out);
+  return dd_send_csv('products.csv', ['ID','Name','Details','Category ID','Category','Price','MRP','Rating','Stock','Image','Active','Reviews'], $out);
 }
 
 /* ════════════════ router ════════════════ */
@@ -932,19 +1406,13 @@ function route_admin_products_csv(array $req): array {
  */
 function dd_handle(array $req): array {
   $GLOBALS['dd_set_cookies'] = [];
-  dd_boot_seed();
   $method = strtoupper($req['method'] ?? 'GET');
   $path = '/' . trim((string) ($req['subpath'] ?? '/'), '/');
   if ($path === '/') $path = '/';
 
-  // size guards
+  // size guard
   $rawLen = strlen((string) ($req['raw'] ?? ''));
-  $ctype = strtolower((string) ($req['headers']['content-type'] ?? ''));
-  $isBinaryUpload = stripos($ctype, 'application/octet-stream') !== false || stripos($ctype, 'application/x-sqlite3') !== false || stripos($ctype, 'application/vnd.sqlite3') !== false;
-  if ($isBinaryUpload && $rawLen > DD_MAX_BACKUP_BYTES) {
-    return dd_json_out(['error' => 'Upload too large (max 40 MB)'], 413);
-  }
-  if (!$isBinaryUpload && $rawLen > DD_MAX_JSON_BYTES) {
+  if ($rawLen > DD_MAX_JSON_BYTES) {
     return dd_json_out(['error' => 'Payload too large'], 413);
   }
 
@@ -956,14 +1424,19 @@ function dd_handle(array $req): array {
   };
 
   try {
+    dd_boot_seed();
+    if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) dd_require_same_origin($req);
     // [method, pattern, handler]
     $route('POST', '#^/auth/register$#', fn ($req) => route_auth_register($req));
     $route('POST', '#^/auth/login$#', fn ($req) => route_auth_login($req));
+    $route('POST', '#^/auth/otp/request$#', fn ($req) => route_auth_otp_request($req));
+    $route('POST', '#^/auth/otp/verify$#', fn ($req) => route_auth_otp_verify($req));
     $route('POST', '#^/auth/logout$#', fn ($req) => route_auth_logout($req));
     $route('GET',  '#^/me$#', fn ($req) => route_me($req));
     $route('PUT',  '#^/me$#', fn ($req) => route_me_put($req));
     $route('GET',  '#^/store/config$#', fn ($req) => route_store_config($req));
     $route('POST', '#^/coupons/validate$#', fn ($req) => route_coupon_validate($req));
+    $route('GET',  '#^/categories$#', fn ($req) => route_categories($req));
     $route('GET',  '#^/products$#', fn ($req) => route_products($req));
     $route('POST', '#^/orders$#', fn ($req) => route_orders_post($req));
     $route('GET',  '#^/my/orders$#', fn ($req) => route_my_orders($req));
@@ -978,16 +1451,23 @@ function dd_handle(array $req): array {
     $route('GET',  '#^/admin/stats$#', fn ($req) => route_admin_stats($req));
     $route('GET',  '#^/admin/orders$#', fn ($req) => route_admin_orders($req));
     $route('PUT',  '#^/admin/orders/(\d+)/status$#', fn ($req, $id) => route_admin_order_status($req, $id));
+    $route('GET',  '#^/admin/categories$#', fn ($req) => route_admin_categories_get($req));
+    $route('POST', '#^/admin/categories$#', fn ($req) => route_admin_categories_post($req));
+    $route('PUT',  '#^/admin/categories/(\d+)$#', fn ($req, $id) => route_admin_categories_put($req, $id));
+    $route('DELETE', '#^/admin/categories/(\d+)$#', fn ($req, $id) => route_admin_categories_delete($req, $id));
     $route('GET',  '#^/admin/products$#', fn ($req) => route_admin_products_get($req));
     $route('POST', '#^/admin/products$#', fn ($req) => route_admin_products_post($req));
     $route('PUT',  '#^/admin/products/([A-Za-z0-9_-]{1,64})$#', fn ($req, $id) => route_admin_products_put($req, $id));
     $route('DELETE', '#^/admin/products/([A-Za-z0-9_-]{1,64})$#', fn ($req, $id) => route_admin_products_delete($req, $id));
     $route('GET',  '#^/admin/customers$#', fn ($req) => route_admin_customers($req));
+    $route('GET',  '#^/admin/customers/(\d+)$#', fn ($req, $id) => route_admin_customer_detail($req, $id));
+    $route('GET',  '#^/admin/customers\.csv$#', fn ($req) => route_admin_customers_csv($req));
     $route('GET',  '#^/admin/inquiries$#', fn ($req) => route_admin_inquiries($req));
     $route('GET',  '#^/products/([A-Za-z0-9_-]{1,32})/reviews$#', fn ($req, $id) => route_reviews_get($req, $id));
     $route('POST', '#^/products/([A-Za-z0-9_-]{1,32})/reviews$#', fn ($req, $id) => route_reviews_post($req, $id));
     $route('GET',  '#^/invoices/(\d+)$#', fn ($req, $id) => route_invoice($req, $id));
     $route('GET',  '#^/admin/report$#', fn ($req) => route_admin_report($req));
+    $route('GET',  '#^/admin/report\.csv$#', fn ($req) => route_admin_report_csv($req));
     $route('GET',  '#^/admin/orders.csv$#', fn ($req) => route_admin_orders_csv($req));
     $route('GET',  '#^/admin/products.csv$#', fn ($req) => route_admin_products_csv($req));
     $route('GET',  '#^/admin/store-config$#', fn ($req) => route_admin_store_config_get($req));
@@ -999,12 +1479,11 @@ function dd_handle(array $req): array {
     $route('GET',  '#^/setup/status$#', fn ($req) => route_setup_status($req));
     $route('POST', '#^/setup/test-db$#', fn ($req) => route_setup_test_db($req));
     $route('POST', '#^/setup/database$#', fn ($req) => route_setup_database($req));
+    $route('POST', '#^/setup/smtp$#', fn ($req) => route_setup_smtp($req));
     $route('POST', '#^/setup/site$#', fn ($req) => route_setup_site($req));
     $route('POST', '#^/setup/admin$#', fn ($req) => route_setup_admin($req));
     $route('POST', '#^/setup/store$#', fn ($req) => route_setup_store($req));
     $route('POST', '#^/setup/complete$#', fn ($req) => route_setup_complete($req));
-    $route('GET',  '#^/admin/backup$#', fn ($req) => route_admin_backup($req));
-    $route('POST', '#^/admin/restore$#', fn ($req) => route_admin_restore($req));
     if ($amount === null) $amount = dd_json_out(['error' => 'Not found'], 404);
   } catch (DdHttpError $e) {
     $amount = dd_json_out(['error' => $e->getMessage()], $e->status);
@@ -1038,9 +1517,7 @@ function dd_web_main(): void {
     $sub = '/' . ltrim((string) ($_GET['r'] ?? ''), '/');
   }
 
-  $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
-        || ((int) ($_SERVER['SERVER_PORT'] ?? 0) === 443);
+  $https = dd_request_is_https();
 
   $req = [
     'method' => strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')),
@@ -1056,9 +1533,7 @@ function dd_web_main(): void {
   $resp = dd_handle($req);
   if (!headers_sent()) {
     http_response_code($resp['status']);
-    header('X-Content-Type-Options: nosniff');
-    header('X-Frame-Options: SAMEORIGIN');
-    header('Referrer-Policy: strict-origin-when-cross-origin');
+    dd_emit_security_headers($https);
     foreach (($resp['headers'] ?? []) as $name => $value) {
       $values = is_array($value) ? $value : [$value];
       foreach ($values as $v) {

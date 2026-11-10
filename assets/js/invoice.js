@@ -1,9 +1,11 @@
-/* /invoice.html — printable GST invoice (owner/admin only, server-authorized) */
+/* /invoice.html — printable order bill/receipt (server-authorized) */
 (function () {
   const $ = (s) => document.querySelector(s);
   const inr = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const id = new URLSearchParams(location.search).get("id");
+  const params = new URLSearchParams(location.search);
+  const id = params.get("id");
+  const token = params.get("token");
 
   const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
     "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
@@ -25,37 +27,42 @@
   async function boot() {
     if (!id) return fail("No invoice specified.");
     try {
-      const res = await fetch("api/invoices/" + encodeURIComponent(id));
+      const query = token ? "?token=" + encodeURIComponent(token) : "";
+      const res = await fetch("api/invoices/" + encodeURIComponent(id) + query, { cache: "no-store", referrerPolicy: "no-referrer" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Couldn’t load the invoice");
       const { invoice: inv, seller } = data;
 
-      $("#invSellerLine").textContent = seller.line;
-      $("#invSellerAddr").textContent = seller.addr;
-      $("#invGstin").textContent = seller.gstin;
-      $("#invSellerEmail").textContent = seller.email;
-      $("#invSellerPhone").textContent = seller.phone;
+      $("#invSellerName").textContent = seller.name || "Store";
+      $("#invSellerLine").textContent = seller.line || "";
+      $("#invSellerLine").hidden = !seller.line;
+      $("#invSellerAddr").textContent = seller.addr || "";
+      $("#invSellerAddr").hidden = !seller.addr;
+      $("#invSellerEmail").textContent = seller.email || "";
+      $("#invSellerPhone").textContent = seller.phone || "";
+      $("#invSellerContact").hidden = !seller.email && !seller.phone;
+      $("#invSellerContactDivider").hidden = !seller.email || !seller.phone;
+      $("#invFooterSeller").textContent = seller.name || "Store";
 
-      document.title = `Invoice #${inv.id} — debasish.`;
-      $("#invId").textContent = "#" + inv.id;
-      $("#invDate").textContent = new Date(String(inv.createdAt).replace(" ", "T") + "Z")
+      document.title = `Order bill ${inv.invoiceNumber} — ${seller.name || "Store"}`;
+      $("#invId").textContent = inv.invoiceNumber;
+      $("#invOrderId").textContent = "#" + inv.id;
+      $("#invDate").textContent = new Date(String(inv.createdAt).replace(" ", "T"))
         .toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
       const st = $("#invStatus");
       st.textContent = inv.status;
       st.className = "inv-status " + inv.status;
 
       $("#invCustName").textContent = inv.customer.name;
+      $("#invCustEmail").textContent = inv.customer.email || "";
+      $("#invCustEmail").hidden = !inv.customer.email;
       $("#invCustPhone").textContent = inv.customer.phone;
       $("#invCustAddr").textContent = inv.customer.address || "Address not provided (COD/UPI on delivery)";
       $("#invPayment").textContent = inv.payment === "upi" ? "UPI on Delivery" : "Cash on Delivery";
-      if (inv.coupon) {
-        $("#invCouponRow").hidden = false;
-        $("#invCoupon").textContent = inv.coupon;
-        $("#invDiscount").textContent = inr(inv.discount);
-      }
+      $("#invCoupon").textContent = inv.coupon ? `(${inv.coupon})` : "";
 
       $("#invItems").innerHTML = inv.items.map((it, i) => `
-        <tr><td>${i + 1}</td><td>${esc(it.name)}</td><td class="c">${it.qty}</td><td class="c">${inr(it.price)}</td><td>${inr(it.lineTotal)}</td></tr>`).join("");
+        <tr><td>${i + 1}</td><td>${esc(it.name)}${it.category ? `<br /><small>${esc(it.category)}</small>` : ""}</td><td class="c">${it.qty}</td><td class="c">${inr(it.price)}</td><td>${inr(it.lineTotal)}</td></tr>`).join("");
 
       $("#invSub").textContent = inr(inv.subtotal);
       if (inv.discount > 0) {
@@ -63,7 +70,6 @@
         $("#invDiscount2").textContent = inr(inv.discount);
       }
       $("#invDelivery").textContent = inv.delivery === 0 ? "FREE" : inr(inv.delivery);
-      $("#invGst").textContent = inr(inv.gstIncluded);
       $("#invTotal").textContent = inr(inv.total);
       $("#invWords").textContent = "Amount in words: INR " + numToWords(inv.total) + " only";
 

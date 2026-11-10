@@ -35,13 +35,16 @@ function dd_misc_main(): void {
       $headers[strtolower(str_replace('_', '-', substr($k, 5)))] = $v;
     }
   }
-  $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
-        || ((int) ($_SERVER['SERVER_PORT'] ?? 0) === 443);
+  $https = dd_request_is_https();
   $req = ['method' => $_SERVER['REQUEST_METHOD'] ?? 'GET', 'headers' => $headers, 'https' => $https];
-  $resp = dd_misc_handle($what, $req);
+  try {
+    $resp = dd_misc_handle($what, $req);
+  } catch (Throwable $e) {
+    error_log('[misc] ' . $e);
+    $resp = ['status' => 503, 'headers' => ['Cache-Control' => 'no-store'], 'body' => 'Service temporarily unavailable.', 'content_type' => 'text/plain; charset=utf-8'];
+  }
   http_response_code($resp['status']);
-  header('X-Content-Type-Options: nosniff');
+  dd_emit_security_headers($https);
   foreach (($resp['headers'] ?? []) as $n => $v) header("$n: $v");
   header('Content-Type: ' . ($resp['content_type'] ?? 'text/plain; charset=utf-8'));
   echo $resp['body'];

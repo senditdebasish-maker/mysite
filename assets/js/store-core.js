@@ -1,6 +1,6 @@
 /* store-core.js — shared engine for the shelf (storefront + product pages)
    Config + catalog loading · cart (dd_cart_v1) · wishlist (dd_wishlist_v1)
-   Cart drawer · coupons · WhatsApp hand-off · GST-inclusive math
+   Cart drawer · coupons · WhatsApp hand-off · order totals
    Full checkout lives on checkout.html (checkout.js) — the drawer links there. */
 window.DD = (function () {
   const SITE = { whatsapp: "910000000000", brand: "Debasish Das" };   // ⚠️ placeholder — keep in sync with app.js
@@ -29,6 +29,10 @@ window.DD = (function () {
   ];
 
   let PRODUCTS = FALLBACK.slice();
+  let CATEGORIES = [
+    { id: null, name: "Tech", slug: "tech" },
+    { id: null, name: "Home & Living", slug: "home-living" },
+  ];
   let CONFIG = { freeAt: 999, deliveryFee: 49, codEnabled: true, codMin: 0, maxQty: 99, storeLive: true, announce: "" };
 
   const findProduct = (id) => PRODUCTS.find(p => p.id === id);
@@ -84,7 +88,6 @@ window.DD = (function () {
     const discount = discountFor(coupon, sub);
     const delivery = sub >= CONFIG.freeAt ? 0 : (lines.length ? CONFIG.deliveryFee : 0);
     const total = Math.max(0, sub - discount + delivery);
-    const gstIncl = Math.round(total * 18 / 118);
 
     $("#cartBadge").textContent = String(count);
     $("#cartCountLabel").textContent = `${count} item${count === 1 ? "" : "s"}`;
@@ -114,7 +117,6 @@ window.DD = (function () {
     $("#sumSub").textContent = fmtINR(sub);
     $("#sumDiscountRow").hidden = discount === 0;
     if (discount > 0) { $("#sumDiscount").textContent = fmtINR(discount); $("#sumCouponCode").textContent = coupon.code; }
-    $("#gstNote").textContent = fmtINR(gstIncl);
     $("#cartTotal").textContent = fmtINR(total);
     $("#deliveryNote").textContent = sub >= CONFIG.freeAt ? "FREE" : `₹${CONFIG.deliveryFee} (free above ${fmtINR(CONFIG.freeAt)})`;
     const fill = Math.min(100, (sub / Math.max(1, CONFIG.freeAt)) * 100);
@@ -229,14 +231,16 @@ window.DD = (function () {
   /* ═══════════ boot: config + catalog ═══════════ */
   async function refreshProducts() {
     try {
-      const res = await fetch("api/products");
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.products) && data.products.length) {
-          PRODUCTS = data.products.map(p => ({ ...p, rating: $n(p.rating) }));
-        }
+      const [productsRes, categoriesRes] = await Promise.all([fetch("api/products"), fetch("api/categories")]);
+      if (!productsRes.ok) throw new Error("Could not load products");
+      const productsData = await productsRes.json();
+      if (Array.isArray(productsData.products)) PRODUCTS = productsData.products.map(p => ({ ...p, rating: $n(p.rating) }));
+      if (categoriesRes.ok) {
+        const categoriesData = await categoriesRes.json();
+        if (Array.isArray(categoriesData.categories)) CATEGORIES = categoriesData.categories;
       }
     } catch { /* offline — fallback list stands */ }
+    window.dispatchEvent(new CustomEvent("dd:catalog-changed"));
     return PRODUCTS;
   }
 
@@ -264,6 +268,7 @@ window.DD = (function () {
     clearCoupon() { coupon = null; saveCoupon(); },
     config: () => CONFIG,
     products: () => PRODUCTS,
+    categories: () => CATEGORIES,
     ready,
     refreshProducts,
     wish,

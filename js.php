@@ -15,9 +15,15 @@ function dd_render_js(string $file): array {
 }
 
 function dd_js_main(): void {
-  $resp = dd_render_js((string) ($_GET['file'] ?? ''));
+  try {
+    $resp = dd_render_js((string) ($_GET['file'] ?? ''));
+  } catch (Throwable $e) {
+    error_log('[asset-js] ' . $e);
+    $resp = ['status' => 503, 'headers' => ['Cache-Control' => 'no-store'], 'body' => 'Service temporarily unavailable.', 'content_type' => 'text/plain; charset=utf-8'];
+  }
   http_response_code($resp['status']);
-  header('X-Content-Type-Options: nosniff');
+  $https = dd_request_is_https();
+  dd_emit_security_headers($https);
   foreach (($resp['headers'] ?? []) as $n => $v) header("$n: $v");
   header('Content-Type: ' . $resp['content_type']);
   echo $resp['body'];

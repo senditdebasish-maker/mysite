@@ -130,7 +130,6 @@ body{ background:var(--cream); }
 .co-total-discount{ color:#7FE0A8; }
 .co-total-grand{ border-top:1px solid rgba(250,246,239,.16); padding-top:.45rem; margin-top:.1rem; font-size:1rem; color:#FFFDF8; align-items:baseline; }
 .co-total-grand strong{ font-family:var(--font-display); font-weight:900; font-size:1.45rem; letter-spacing:-.02em; }
-.co-gst{ font-size:.68rem; color:#8f8b81; }
 
 .co-place{
   width:100%; display:flex; align-items:center; justify-content:center; gap:.6rem;

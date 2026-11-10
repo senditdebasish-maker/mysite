@@ -28,7 +28,7 @@
     customers: { title: "Customers",         sub: "Everyone who created an account, by revenue." },
     inquiries: { title: "Leads",             sub: "“Book a free call” submissions — reply in one tap." },
     storefront: { title: "Storefront",       sub: "Announcement, delivery rules, coupons, featured picks and live stock." },
-    reports:   { title: "Reports",           sub: "Revenue pulse, best-sellers, payment mix and coupon performance." },
+    reports:   { title: "Reports",           sub: "Date-filtered sales, product and category performance, and CSV export." },
   };
 
   let me = null;
@@ -37,10 +37,18 @@
   let orderQuery = "";
   let orderFrom = "";
   let orderTo = "";
+  let orderPage = 1;
+  const orderPageSize = 50;
   let ordersCache = [];
   let productFilter = "all";
+  let productCategoryFilter = "all";
+  let productQuery = "";
+  let productSort = "name";
   let productsCache = [];
+  let categoriesCache = [];
+  let customerQuery = "";
   let editingId = null;
+  let editingCategoryId = null;
 
   /* ───────── tabs ───────── */
   function setTab(tab) {
@@ -144,11 +152,15 @@
           </select>
         </td>
         <td class="muted">${esc(dt(o.created_at))}</td>
-        <td>${waLink ? `<a class="mini-btn" href="${waLink}" target="_blank" rel="noopener" title="Message customer on WhatsApp">WA</a>` : ""}</td>
+        <td>
+          <a class="mini-btn" href="invoice.html?id=${encodeURIComponent(o.id)}" target="_blank" rel="noopener" title="Open order bill">Bill</a>
+          ${waLink ? `<a class="mini-btn" href="${waLink}" target="_blank" rel="noopener" title="Message customer on WhatsApp">WA</a>` : ""}
+        </td>
       </tr>`;
   }
 
-  const orderHaystack = (o) => [o.id, o.customer_name, o.phone, o.user_email, o.coupon_code, o.address, o.note]
+  const orderHaystack = (o) => [o.id, o.customer_name, o.phone, o.user_email, o.coupon_code, o.address, o.note,
+    ...(o.items || []).flatMap(item => [item.id, item.name])]
     .map(v => String(v ?? "").toLowerCase()).join(" ");
   const orderInRange = (o) => {
     const day = String(o.created_at || "").slice(0, 10);
@@ -183,7 +195,18 @@
   }
 
   async function loadOrders() {
-    ordersCache = (await fetchJSON("api/admin/orders")).orders || [];
+    const params = new URLSearchParams({ page: String(orderPage), per_page: String(orderPageSize), status: orderFilter });
+    if (orderQuery) params.set("q", orderQuery);
+    if (orderFrom) params.set("from", orderFrom);
+    if (orderTo) params.set("to", orderTo);
+    const data = await fetchJSON("api/admin/orders?" + params.toString());
+    ordersCache = data.orders || [];
+    const total = Number(data.total || 0);
+    const start = total ? (orderPage - 1) * orderPageSize + 1 : 0;
+    const end = Math.min(orderPage * orderPageSize, total);
+    $("#ordersPageSummary").textContent = total ? `Showing ${start}–${end} of ${total} matching orders` : "No matching orders";
+    $("#ordersPrev").disabled = orderPage <= 1;
+    $("#ordersNext").disabled = end >= total;
     syncOrdersCsvLink();
     const rows = visibleOrders();
     $("#ordersBody").innerHTML = rows.map(orderRow).join("");
@@ -194,16 +217,28 @@
   $("#ordersBody").addEventListener("change", (e) => {
     if (e.target.closest(".bulk-row")) syncBulkBar();
   });
+  $("#productSearch").addEventListener("input", (e) => {
+    productQuery = e.target.value.trim().toLowerCase();
+    renderProducts();
+  });
+  $("#productSort").addEventListener("change", (e) => {
+    productSort = e.target.value;
+    renderProducts();
+  });
   $("#orderSearch").addEventListener("input", (e) => {
     orderQuery = e.target.value.trim().toLowerCase();
+    orderPage = 1;
     syncOrdersCsvLink();
     clearTimeout(window.__orderSearchT);
     window.__orderSearchT = setTimeout(() => loadOrders().catch(err => toast(err.message)), 180);
   });
-  $("#orderFrom").addEventListener("change", (e) => { orderFrom = e.target.value; loadOrders().catch(err => toast(err.message)); });
-  $("#orderTo").addEventListener("change", (e) => { orderTo = e.target.value; loadOrders().catch(err => toast(err.message)); });
+  $("#orderFrom").addEventListener("change", (e) => { orderFrom = e.target.value; orderPage = 1; loadOrders().catch(err => toast(err.message)); });
+  $("#orderTo").addEventListener("change", (e) => { orderTo = e.target.value; orderPage = 1; loadOrders().catch(err => toast(err.message)); });
+  $("#ordersPrev").addEventListener("click", () => { if (orderPage > 1) { orderPage--; loadOrders().catch(err => toast(err.message)); } });
+  $("#ordersNext").addEventListener("click", () => { orderPage++; loadOrders().catch(err => toast(err.message)); });
   $("#ordersCsvClear").addEventListener("click", () => {
     orderFrom = orderTo = orderQuery = "";
+    orderPage = 1;
     $("#orderSearch").value = ""; $("#orderFrom").value = ""; $("#orderTo").value = "";
     loadOrders().catch(err => toast(err.message));
   });
@@ -216,15 +251,16 @@
     const status = $("#bulkStatus").value;
     if (!window.confirm(`Set ${ids.length} order(s) to “${statusLabel[status] || status}”?`)) return;
     const btn = $("#bulkApply"); btn.disabled = true;
-    let done = 0, failed = 0;
+    let done = 0;
+    const failed = [];
     for (const id of ids) {
       try {
         await fetchJSON(`api/admin/orders/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) });
         const o = ordersCache.find(x => x.id === id); if (o) o.status = status;
         done++;
-      } catch { failed++; }
+      } catch { failed.push(id); }
     }
-    toast(`${done} order(s) → <b>${statusLabel[status] || status}</b>${failed ? ` · ${failed} failed` : ""}`);
+    toast(`${done} order(s) → <b>${statusLabel[status] || status}</b>${failed.length ? ` · ${failed.length} failed (for example: #${failed.slice(0, 3).join(", #")})` : ""}`);
     btn.disabled = false;
     loadOrders().catch(() => {});
     loadOverview().catch(() => {});
@@ -233,14 +269,15 @@
   $("#ordersBody").addEventListener("change", async (e) => {
     const sel = e.target.closest("select[data-status-id]");
     if (!sel) return;
+    const order = ordersCache.find(x => x.id === Number(sel.dataset.statusId));
+    const previousStatus = order?.status || "pending";
     try {
       await fetchJSON(`api/admin/orders/${sel.dataset.statusId}/status`, { method: "PUT", body: JSON.stringify({ status: sel.value }) });
-      const o = ordersCache.find(x => x.id === Number(sel.dataset.statusId));
-      if (o) o.status = sel.value;
       toast(`Order #${sel.dataset.statusId} → <b>${statusLabel[sel.value]}</b>`);
-      // refresh badges quietly
+      await loadOrders();
       loadOverview().catch(() => {});
     } catch (err) {
+      sel.value = previousStatus;
       toast(err.message);
     }
   });
@@ -248,6 +285,7 @@
   $("#orderFilterChips").addEventListener("click", (e) => {
     const chip = e.target.closest(".chip"); if (!chip) return;
     orderFilter = chip.dataset.filter;
+    orderPage = 1;
     $$("#orderFilterChips .chip").forEach(c => c.classList.toggle("is-active", c === chip));
     loadOrders().catch(err => toast(err.message));
   });
@@ -262,7 +300,7 @@
     return `
       <div class="product-row" data-id="${esc(p.id)}">
         <img src="${esc(p.img)}" alt="${esc(p.name)}" width="58" height="58" loading="lazy" />
-        <div>
+        <div class="pr-details">
           <div class="pr-name">${esc(p.name)} ${p.active ? "" : `<span class="badge-inactive">Hidden</span>`}</div>
           <div class="pr-meta">${esc(p.meta)} · ${esc(p.tag)} · ★ ${esc(p.rating)}</div>
         </div>
@@ -270,55 +308,179 @@
         <div class="pr-price">${inr(p.price)}${p.was ? `<br /><span class="muted" style="font-size:.66rem; text-decoration:line-through">${inr(p.was)}</span>` : ""}</div>
         <div class="row-actions">
           <button class="mini-btn" data-edit="${esc(p.id)}">Edit</button>
+          <button class="mini-btn" data-duplicate="${esc(p.id)}">Copy</button>
           <button class="mini-btn danger" data-delete="${esc(p.id)}">Delete</button>
         </div>
-        <div></div>
       </div>`;
   }
 
   const productVisible = (p) => {
+    const search = [p.id, p.name, p.meta, p.tag].join(" ").toLowerCase();
+    if (productQuery && !search.includes(productQuery)) return false;
+    if (productCategoryFilter !== "all" && String(p.category_id ?? "") !== productCategoryFilter) return false;
     if (productFilter === "low") return p.stock > 0 && p.stock <= 5;
     if (productFilter === "out") return p.stock <= 0;
     if (productFilter === "hidden") return !p.active;
     return true;
   };
-  async function loadProducts() {
-    productsCache = (await fetchJSON("api/admin/products")).products || [];
+  function renderProducts() {
     const rows = productsCache.filter(productVisible);
+    const sorters = {
+      name: (a, b) => a.name.localeCompare(b.name),
+      "price-low": (a, b) => Number(a.price) - Number(b.price),
+      "price-high": (a, b) => Number(b.price) - Number(a.price),
+      "stock-low": (a, b) => Number(a.stock) - Number(b.stock),
+      newest: (a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")),
+    };
+    rows.sort(sorters[productSort] || sorters.name);
+    $("#productResultCount").textContent = `${rows.length} of ${productsCache.length} products`;
     $("#productsList").innerHTML = rows.map(productRow).join("") ||
-      (productFilter === "all"
+      (productQuery
+        ? `<p class="muted">No products match your search and filters.</p>`
+        : productFilter === "all"
         ? `<p class="muted">No products yet — add your first one.</p>`
         : `<p class="muted">No products in this bucket — nice.</p>`);
   }
+  async function loadProducts() {
+    const [products, categories] = await Promise.all([
+      fetchJSON("api/admin/products"),
+      fetchJSON("api/admin/categories"),
+    ]);
+    productsCache = products.products || [];
+    categoriesCache = categories.categories || [];
+    renderCategories();
+    renderCategoryOptions();
+    renderProducts();
+  }
+  function renderCategoryOptions() {
+    $("#productCategoryFilter").innerHTML = `<option value="all">All categories</option>` +
+      categoriesCache.map(c => `<option value="${c.id}">${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("");
+    $("#productCategoryFilter").value = productCategoryFilter;
+    const selectedProductCategory = $("#pf-category").value;
+    $("#pf-category").innerHTML = categoriesCache.map(c =>
+      `<option value="${c.id}">${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`
+    ).join("");
+    if (categoriesCache.some(c => String(c.id) === selectedProductCategory)) $("#pf-category").value = selectedProductCategory;
+  }
+  function renderCategories() {
+    $("#categoryList").innerHTML = categoriesCache.map(c => `
+      <div class="category-row">
+        <div class="category-info">
+          <strong>${esc(c.name)}</strong>
+          <span>${esc(c.description || "No description")} · ${c.product_count} product${c.product_count === 1 ? "" : "s"} · ${c.active ? "Active" : "Inactive"}</span>
+        </div>
+        <div class="category-actions">
+          <button type="button" class="mini-btn" data-edit-category="${c.id}">Edit</button>
+          <button type="button" class="mini-btn danger" data-delete-category="${c.id}" ${c.product_count ? "disabled title=\"Move or remove products first\"" : ""}>Delete</button>
+        </div>
+      </div>`).join("") || `<p class="muted">No categories yet. Add one before creating products.</p>`;
+  }
+  $("#productCategoryFilter").addEventListener("change", e => {
+    productCategoryFilter = e.target.value;
+    renderProducts();
+  });
+  $("#categoryCreateForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const button = $("#categoryCreateButton");
+    button.disabled = true;
+    try {
+      await fetchJSON("api/admin/categories", { method: "POST", body: JSON.stringify({
+        name: $("#categoryName").value,
+        description: $("#categoryDescription").value,
+      }) });
+      e.target.reset();
+      await loadProducts();
+      toast("Category added");
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  const categoryEditor = $("#categoryEditor");
+  function openCategoryEditor(category) {
+    editingCategoryId = category.id;
+    $("#cf-name").value = category.name;
+    $("#cf-description").value = category.description || "";
+    $("#cf-sort").value = category.sort_order;
+    $("#cf-active").checked = !!category.active;
+    $("#categoryEditorHint").textContent = `${category.product_count} product${category.product_count === 1 ? "" : "s"} assigned.`;
+    categoryEditor.hidden = false;
+    $("#cf-name").focus();
+  }
+  function closeCategoryEditor() {
+    categoryEditor.hidden = true;
+    editingCategoryId = null;
+  }
+  $("#categoryEditorCancel").addEventListener("click", closeCategoryEditor);
+  categoryEditor.addEventListener("click", e => { if (e.target === categoryEditor) closeCategoryEditor(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !categoryEditor.hidden) closeCategoryEditor(); });
+  $("#categoryForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!editingCategoryId) return;
+    const button = $("#categoryEditorSave");
+    button.disabled = true;
+    try {
+      await fetchJSON(`api/admin/categories/${editingCategoryId}`, { method: "PUT", body: JSON.stringify({
+        name: $("#cf-name").value,
+        description: $("#cf-description").value,
+        sort_order: $("#cf-sort").value,
+        active: $("#cf-active").checked,
+      }) });
+      closeCategoryEditor();
+      await loadProducts();
+      toast("Category saved");
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $("#categoryList").addEventListener("click", async e => {
+    const edit = e.target.closest("[data-edit-category]");
+    if (edit) {
+      const category = categoriesCache.find(c => c.id === Number(edit.dataset.editCategory));
+      if (category) openCategoryEditor(category);
+      return;
+    }
+    const remove = e.target.closest("[data-delete-category]");
+    if (!remove || remove.disabled) return;
+    const category = categoriesCache.find(c => c.id === Number(remove.dataset.deleteCategory));
+    if (!category || !confirm(`Delete the “${category.name}” category?`)) return;
+    try {
+      await fetchJSON(`api/admin/categories/${category.id}`, { method: "DELETE" });
+      if (productCategoryFilter === String(category.id)) productCategoryFilter = "all";
+      await loadProducts();
+      toast("Category deleted");
+    } catch (err) {
+      toast(err.message);
+    }
+  });
   $("#productFilterChips").addEventListener("click", (e) => {
     const chip = e.target.closest(".chip"); if (!chip) return;
     productFilter = chip.dataset.pfilter;
     $$("#productFilterChips .chip").forEach(c => c.classList.toggle("is-active", c === chip));
-    loadProducts().catch(err => toast(err.message));
+    renderProducts();
   });
 
   // editor modal
   const editor = $("#productEditor");
-  const imgSelect = $("#pf-img");
-  imgSelect.innerHTML = IMG_CHOICES.map(src => `<option value="${src}">${src.split("/").pop()}</option>`).join("");
+  $("#productImageChoices").innerHTML = IMG_CHOICES.map(src => `<option value="${src}"></option>`).join("");
 
-  function openEditor(product) {
-    editingId = product ? product.id : null;
-    $("#editorTitle").textContent = product ? "Edit product" : "Add product";
-    $("#editorSave").textContent  = product ? "Save changes" : "Add product";
-    $("#pf-name").value   = product?.name   ?? "";
+  function openEditor(product, duplicate = false) {
+    editingId = product && !duplicate ? product.id : null;
+    $("#editorTitle").textContent = product ? (duplicate ? "Duplicate product" : "Edit product") : "Add product";
+    $("#editorSave").textContent  = product && !duplicate ? "Save changes" : "Add product";
+    $("#pf-name").value   = product ? `${product.name}${duplicate ? " copy" : ""}` : "";
     $("#pf-meta").value   = product?.meta   ?? "";
-    $("#pf-tag").value    = product?.tag    ?? "Tech";
-    $("#pf-img").value    = product?.img    ?? IMG_CHOICES[0];
-    if (product && !IMG_CHOICES.includes(product.img)) {
-      imgSelect.innerHTML += `<option value="${esc(product.img)}" selected>${esc(product.img.split("/").pop())}</option>`;
-      $("#pf-img").value = product.img;
-    }
+    renderCategoryOptions();
+    $("#pf-category").value = product?.category_id ? String(product.category_id) : String(categoriesCache.find(c => c.active)?.id ?? "");
+    $("#pf-img").value    = product?.img   ?? IMG_CHOICES[0];
     $("#pf-price").value  = product?.price  ?? "";
     $("#pf-was").value    = product?.was    ?? "";
-    $("#pf-stock").value  = product?.stock  ?? "";
+    $("#pf-stock").value  = product && !duplicate ? product.stock : (duplicate ? 0 : "");
     $("#pf-rating").value = product?.rating ?? "4.8";
-    $("#pf-active").checked = product ? !!product.active : true;
+    $("#pf-active").checked = product && !duplicate ? !!product.active : !duplicate;
     editor.hidden = false;
     $("#pf-name").focus();
   }
@@ -334,7 +496,7 @@
     const body = {
       name:   $("#pf-name").value,
       meta:   $("#pf-meta").value,
-      tag:    $("#pf-tag").value,
+      category_id: $("#pf-category").value,
       img:    $("#pf-img").value,
       price:  $("#pf-price").value,
       was:    $("#pf-was").value || 0,
@@ -367,6 +529,12 @@
       if (p) openEditor(p);
       return;
     }
+    const duplicateBtn = e.target.closest("[data-duplicate]");
+    if (duplicateBtn) {
+      const p = productsCache.find(x => x.id === duplicateBtn.dataset.duplicate);
+      if (p) openEditor(p, true);
+      return;
+    }
     const delBtn = e.target.closest("[data-delete]");
     if (delBtn) {
       const p = productsCache.find(x => x.id === delBtn.dataset.delete);
@@ -382,18 +550,51 @@
 
   /* ───────── customers ───────── */
   async function loadCustomers() {
-    const data = await fetchJSON("api/admin/customers");
+    const params = new URLSearchParams();
+    if (customerQuery) params.set("q", customerQuery);
+    const queryString = params.toString();
+    const data = await fetchJSON("api/admin/customers" + (queryString ? "?" + queryString : ""));
     const rows = data.customers || [];
+    $("#customerResultCount").textContent = `${rows.length} customer${rows.length === 1 ? "" : "s"}`;
     $("#customersBody").innerHTML = rows.map(c => `
       <tr>
-        <td><strong>${esc(c.name)}</strong></td>
-        <td>${esc(c.email)}</td>
+        <td><strong>${esc(c.name)}</strong><br /><span class="muted">@${esc(c.username || "")} · #${esc(c.id)}</span></td>
+        <td><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></td>
         <td>${esc(c.phone || "—")}</td>
         <td>${c.orders}</td>
         <td>${inr(c.revenue)}</td>
+        <td class="muted">${c.last_order ? esc(dt(c.last_order)) : "—"}</td>
         <td class="muted">${esc(dt(c.created_at))}</td>
-      </tr>`).join("") || `<tr><td colspan="6" class="muted">No customers yet — share the site link!</td></tr>`;
+        <td><button class="mini-btn" type="button" data-customer-detail="${esc(c.id)}">History</button></td>
+      </tr>`).join("") || `<tr><td colspan="8" class="muted">${customerQuery ? "No customers match your search." : "No customers yet — share the site link!"}</td></tr>`;
   }
+  $("#customerSearch").addEventListener("input", (e) => {
+    customerQuery = e.target.value.trim();
+    clearTimeout(window.__customerSearchT);
+    window.__customerSearchT = setTimeout(() => loadCustomers().catch(err => toast(err.message)), 180);
+  });
+  const customerDetail = $("#customerDetail");
+  async function showCustomerDetail(id) {
+    const data = await fetchJSON(`api/admin/customers/${encodeURIComponent(id)}`);
+    const c = data.customer;
+    $("#customerDetailTitle").textContent = c.name;
+    $("#customerDetailMeta").innerHTML = `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>${c.phone ? ` · <a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : ""} · joined ${esc(dt(c.created_at))}`;
+    $("#customerDetailOrders").textContent = c.orders;
+    $("#customerDetailRevenue").textContent = inr(c.revenue);
+    $("#customerDetailHistory").innerHTML = (data.orders || []).map(o => {
+      const items = (o.items || []).map(i => `${esc(i.name)} ×${esc(i.qty)}`).join(", ");
+      return `<tr><td><strong>#${esc(o.id)}</strong></td><td>${items || "—"}</td><td>${inr(o.total)}</td><td><span class="status-pill st-${esc(o.status)}">${esc(statusLabel[o.status] || o.status)}</span></td><td>${esc(dt(o.created_at))}</td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="muted">No orders yet.</td></tr>`;
+    customerDetail.hidden = false;
+    $("#customerDetailClose").focus();
+  }
+  $("#customersBody").addEventListener("click", (e) => {
+    const button = e.target.closest("[data-customer-detail]");
+    if (button) showCustomerDetail(button.dataset.customerDetail).catch(err => toast(err.message));
+  });
+  $("#customerDetailClose").addEventListener("click", () => { customerDetail.hidden = true; });
+  customerDetail.addEventListener("click", e => { if (e.target === customerDetail) customerDetail.hidden = true; });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !customerDetail.hidden) customerDetail.hidden = true; });
 
   /* ───────── inquiries / leads ───────── */
   function inquiryCard(q) {
@@ -570,7 +771,7 @@
             <span class="sf-inv-name">${esc(p.name)}</span>
             <span class="sf-inv-sub">${inr(p.price)} · ${esc(p.tag)}</span>
           </div>
-          <input class="sf-stock-input" type="number" min="0" step="1" value="${p.stock}" aria-label="Stock for ${esc(p.name)}" data-stock-id="${esc(p.id)}" />
+          <input class="sf-stock-input" type="number" min="0" max="2147483647" step="1" value="${p.stock}" aria-label="Stock for ${esc(p.name)}" data-stock-id="${esc(p.id)}" />
           <button class="mini-btn sf-restock" data-restock="${esc(p.id)}" title="Add 10 units">+10</button>
         </div>`;
     }).join("");
@@ -604,41 +805,80 @@
   });
 
   /* ───────── reports ───────── */
+  function reportQuery() {
+    const params = new URLSearchParams();
+    if ($("#rpFrom").value) params.set("from", $("#rpFrom").value);
+    if ($("#rpTo").value) params.set("to", $("#rpTo").value);
+    return params;
+  }
+  function syncReportCsvLink() {
+    const params = reportQuery();
+    $("#rpCsvLink").href = "api/admin/report.csv" + (params.toString() ? "?" + params.toString() : "");
+  }
   async function loadReport() {
-    const r = await fetchJSON("api/admin/report");
+    const params = reportQuery();
+    const r = await fetchJSON("api/admin/report" + (params.toString() ? "?" + params.toString() : ""));
+    $("#rpFrom").value = r.from;
+    $("#rpTo").value = r.to;
+    $("#rpPeriodLabel").textContent = `${r.from} – ${r.to}`;
+    syncReportCsvLink();
     $("#rpAov").textContent = inr(r.aov || 0);
-    $("#rpOrdersAll").textContent = `${r.ordersAllTime || 0} orders all time`;
-    $("#rpUnits").textContent = String(r.units30d || 0);
-    $("#rpCouponOrders").textContent = String(r.coupons?.orders || 0);
-    $("#rpCouponSaved").textContent = `${inr(r.coupons?.saved || 0)} saved by customers`;
-    $("#rpPaySplit").textContent = `${r.payment?.cod || 0} / ${r.payment?.upi || 0}`;
+    $("#rpOrdersAll").textContent = `Selected period · ${r.orders || 0} non-cancelled orders`;
+    $("#rpRevenue").textContent = inr(r.grossSales || 0);
+    $("#rpPeriodOrders").textContent = `${r.orders || 0} non-cancelled order${r.orders === 1 ? "" : "s"} · ${r.cancelled || 0} cancelled`;
+    $("#rpUnits").textContent = String(r.units || 0);
+    $("#rpPipeline").textContent = `${r.open || 0} / ${r.cancelled || 0}`;
+    $("#rpCouponSaved").textContent = `${inr(r.coupons?.saved || 0)} coupon savings`;
 
     const days = r.days || [];
-    const max = Math.max(1, ...days.map(d => d.revenue));
+    const chartRows = days.length > 31
+      ? Array.from({ length: Math.ceil(days.length / 7) }, (_, index) => {
+        const group = days.slice(index * 7, index * 7 + 7);
+        return {
+          date: group[0].date, endDate: group[group.length - 1].date,
+          orders: group.reduce((sum, day) => sum + day.orders, 0),
+          revenue: group.reduce((sum, day) => sum + day.revenue, 0),
+        };
+      })
+      : days;
+    const max = Math.max(1, ...chartRows.map(d => d.revenue));
     const fmtDay = (iso) => { const d = new Date(iso + "T00:00:00"); return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" }); };
-    $("#rpChart").innerHTML = days.map(d => `
-      <div class="rp-col" title="${fmtDay(d.date)} — ${inr(d.revenue)} · ${d.orders} order${d.orders === 1 ? "" : "s"}">
+    $("#rpChart").innerHTML = chartRows.map((d, index) => `
+      <div class="rp-col" title="${fmtDay(d.date)}${d.endDate ? ` – ${fmtDay(d.endDate)}` : ""} — ${inr(d.revenue)} · ${d.orders} order${d.orders === 1 ? "" : "s"}">
         <span class="rp-col-val">${d.revenue ? "₹" + (d.revenue >= 1000 ? (d.revenue / 1000).toFixed(1) + "k" : d.revenue) : ""}</span>
         <div class="rp-bar${d.revenue === 0 ? " is-zero" : ""}" style="height:${Math.max(3, Math.round(d.revenue / max * 130))}px"></div>
-        <span class="rp-col-label">${fmtDay(d.date).split(" ")[0]}</span>
+        <span class="rp-col-label">${chartRows.length <= 31 || index % 2 === 0 ? fmtDay(d.date).split(" ")[0] : ""}</span>
       </div>`).join("");
-    const total14 = days.reduce((s, d) => s + d.revenue, 0);
-    $("#rpTotal14").textContent = `${inr(total14)} in 14 days`;
+    const total = days.reduce((s, d) => s + d.revenue, 0);
+    $("#rpTotal14").textContent = `${inr(total)} in selected period`;
     $("#rpChartStart").textContent = days.length ? fmtDay(days[0].date) : "—";
     $("#rpChartEnd").textContent = days.length ? fmtDay(days[days.length - 1].date) : "—";
 
     const top = r.topProducts || [];
     $("#rpTopBody").innerHTML = top.map(x => `
       <tr><td><strong>${esc(x.name)}</strong></td><td>${x.units}</td><td>${inr(x.revenue)}</td></tr>`).join("")
-      || `<tr><td colspan="3" class="muted">No sales in the last 30 days.</td></tr>`;
+      || `<tr><td colspan="3" class="muted">No sales in this period.</td></tr>`;
+    const categories = r.categories || [];
+    $("#rpCategoryBody").innerHTML = categories.map(x => `
+      <tr><td><strong>${esc(x.name)}</strong></td><td>${x.units}</td><td>${inr(x.revenue)}</td><td>${r.itemSales ? Math.round(x.revenue / r.itemSales * 100) : 0}%</td></tr>`).join("")
+      || `<tr><td colspan="4" class="muted">No category sales in this period.</td></tr>`;
 
     const cod = r.payment?.cod || 0, upi = r.payment?.upi || 0, t = Math.max(1, cod + upi);
     $("#rpBarCod").style.width = Math.round(cod / t * 100) + "%";
     $("#rpBarUpi").style.width = Math.round(upi / t * 100) + "%";
     $("#rpValCod").textContent = `${cod} orders · ${inr(r.payment?.codRevenue || 0)}`;
     $("#rpValUpi").textContent = `${upi} orders · ${inr(r.payment?.upiRevenue || 0)}`;
-    $("#rpPayNote").textContent = upi >= cod ? "UPI is healthy — keep both options on." : "COD still dominates — consider a small prepaid discount to shift mix.";
+    $("#rpPayNote").textContent = `${cod + upi} non-cancelled orders in this period.`;
   }
+  $("#rpApply").addEventListener("click", () => {
+    const from = $("#rpFrom").value, to = $("#rpTo").value;
+    if ((from && to && from > to) || (!from && !to)) {
+      if (!from && !to) { loadReport().catch(err => toast(err.message)); return; }
+      toast("Start date must be on or before end date");
+      return;
+    }
+    loadReport().catch(err => toast(err.message));
+  });
 
   /* ───────── boot ───────── */
   bindLogout("logoutBtn");

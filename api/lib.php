@@ -1,7 +1,7 @@
 <?php
 /**
- * Debasish Das — Web Studio & Store · PHP backend (shared-hosting edition)
- * Any Apache + PHP 8 host with PDO SQLite.
+ * Debasish Das — Web Studio & Store · XAMPP PHP backend
+ * Apache + PHP 8 + MySQL/MariaDB via PDO.
  * The JSON API is versioned in lockstep with the frontend.
  * frontend JS works unchanged.
  */
@@ -10,48 +10,43 @@ declare(strict_types=1);
 define('DD_ROOT', dirname(__DIR__));
 define('DD_DATA', ($__dd = getenv('DD_DATA_DIR')) !== false && $__dd !== '' ? rtrim(str_replace('\\', '/', $__dd), '/') : DD_ROOT . '/data');
 define('DD_MAX_JSON_BYTES', 120 * 1024);
-define('DD_MAX_BACKUP_BYTES', 40 * 1024 * 1024);
 
 /* ════════════════ paths & environment ════════════════ */
 function dd_mkdir_data(): void {
-  if (!is_dir(DD_DATA)) @mkdir(DD_DATA, 0775, true);
-  // keep the database out of the web root on Apache hosts
+  if (!is_dir(DD_DATA) && !@mkdir(DD_DATA, 0775, true) && !is_dir(DD_DATA)) {
+    throw new RuntimeException('Could not create the private data directory. Check its path and Apache permissions.');
+  }
   $guard = DD_DATA . '/.htaccess';
-  if (!is_file($guard)) @file_put_contents($guard, "Require all denied\n\n# Apache 2.2\n<IfModule !mod_authz_core.c>\nOrder deny,allow\nDeny from all\n</IfModule>\n");
+  if (!is_file($guard) && file_put_contents($guard, "Require all denied\n\n# Apache 2.2\n<IfModule !mod_authz_core.c>\nOrder deny,allow\nDeny from all\n</IfModule>\n", LOCK_EX) === false) {
+    throw new RuntimeException('Could not protect the private data directory. Check its path and Apache permissions.');
+  }
 }
 dd_mkdir_data();
 
 function dd_read_install(): array {
   $f = DD_DATA . '/install.json';
   if (!is_file($f)) return [];
-  $j = json_decode((string) @file_get_contents($f), true);
-  return is_array($j) ? $j : [];
+  $fp = @fopen($f, 'rb');
+  if (!$fp) throw new RuntimeException('Could not read the private installation settings file.');
+  try {
+    if (!flock($fp, LOCK_SH)) throw new RuntimeException('Could not lock the private installation settings file.');
+    $raw = stream_get_contents($fp);
+    if ($raw === false) throw new RuntimeException('Could not read the private installation settings file.');
+  } finally {
+    flock($fp, LOCK_UN);
+    fclose($fp);
+  }
+  $settings = json_decode($raw, true);
+  if (!is_array($settings)) throw new RuntimeException('The private installation settings file is invalid JSON.');
+  return $settings;
 }
 function dd_write_install(array $obj): void {
-  @file_put_contents(DD_DATA . '/install.json', json_encode($obj, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-}
-
-/** Resolve a user-supplied database path. */
-function dd_resolve_db_target(?string $p): string {
-  $s = trim((string) $p);
-  if ($s === '') $s = DD_DATA . '/site.db';
-  if ($s[0] === '~') {
-    $home = getenv('HOME') ?: (getenv('USERPROFILE') ?: '/');
-    $s = $home . substr($s, 1);
+  $path = DD_DATA . '/install.json';
+  $json = json_encode($obj, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+  if ($json === false || file_put_contents($path, $json, LOCK_EX) === false) {
+    throw new RuntimeException('Could not save setup credentials. Check that the data folder is writable.');
   }
-  $isAbs = ($s[0] === '/') || preg_match('/^[A-Za-z]:[\\\\\/]/', $s) || (substr($s, 0, 2) === '\\\\');
-  $abs = $isAbs ? $s : (DD_ROOT . '/' . $s);
-  $abs = str_replace('\\', '/', $abs);
-  // lexical normalisation (.. segments)
-  $parts = [];
-  foreach (explode('/', $abs) as $seg) {
-    if ($seg === '' || $seg === '.') continue;
-    if ($seg === '..') { array_pop($parts); continue; }
-    $parts[] = $seg;
-  }
-  $abs = (substr($abs, 0, 1) === '/' ? '/' : '') . implode('/', $parts);
-  if (strpos($abs, "\0") !== false) throw new DdHttpError(400, 'Invalid path');
-  return $abs;
+  @chmod($path, 0600);
 }
 
 /* ════════════════ errors ════════════════ */
@@ -64,26 +59,47 @@ class DdHttpError extends Exception {
 }
 
 /* ════════════════ database ════════════════ */
-function dd_env_db_path(): ?string {
-  $e = getenv('DB_PATH');
-  return ($e !== false && trim($e) !== '') ? dd_resolve_db_target($e) : null;
+function dd_mysql_config(array $input): array {
+  $host = trim((string) ($input['host'] ?? ''));
+  $database = trim((string) ($input['database'] ?? ''));
+  $username = trim((string) ($input['username'] ?? ''));
+  $password = (string) ($input['password'] ?? '');
+  $port = filter_var($input['port'] ?? 3306, FILTER_VALIDATE_INT);
+  if (!preg_match('/^[A-Za-z0-9.:-]{1,253}$/', $host)) throw new DdHttpError(400, 'Enter a valid MySQL host name or IP address');
+  if (!preg_match('/^[A-Za-z0-9_$-]{1,64}$/', $database)) throw new DdHttpError(400, 'Enter a valid database name');
+  if (!preg_match('/^[A-Za-z0-9_.@-]{1,128}$/', $username)) throw new DdHttpError(400, 'Enter the MySQL username');
+  if ($port === false || $port < 1 || $port > 65535) throw new DdHttpError(400, 'Enter a valid MySQL port');
+  if (strlen($password) > 256) throw new DdHttpError(400, 'The MySQL password is too long');
+  return ['host' => $host, 'database' => $database, 'username' => $username, 'password' => $password, 'port' => $port];
+}
+
+function dd_mysql_connect(array $config): PDO {
+  $config = dd_mysql_config($config);
+  $dsn = "mysql:host={$config['host']};port={$config['port']};dbname={$config['database']};charset=utf8mb4";
+  return new PDO($dsn, $config['username'], $config['password'], [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    PDO::ATTR_EMULATE_PREPARES => false,
+  ]);
+}
+
+function dd_mysql_connect_server(array $config): PDO {
+  $config = dd_mysql_config($config);
+  $dsn = "mysql:host={$config['host']};port={$config['port']};charset=utf8mb4";
+  return new PDO($dsn, $config['username'], $config['password'], [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    PDO::ATTR_EMULATE_PREPARES => false,
+  ]);
 }
 
 final class DdDb {
   public static ?PDO $pdo = null;
-  public static string $path = '';
+  public static array $config = [];
 
-  public static function open(string $path): void {
-    $path = dd_resolve_db_target($path);
-    $dir = dirname($path);
-    if (!is_dir($dir)) @mkdir($dir, 0775, true);
-    self::$path = $path;
-    self::$pdo = new PDO('sqlite:' . $path, null, null, [
-      PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-      PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
-    self::$pdo->exec('PRAGMA foreign_keys = ON');
-    self::$pdo->exec('PRAGMA busy_timeout = 5000');
+  public static function open(array $config): void {
+    self::$config = dd_mysql_config($config);
+    self::$pdo = dd_mysql_connect(self::$config);
     self::ensureSchema();
     self::runMigrations();
   }
@@ -94,133 +110,218 @@ final class DdDb {
 
   public static function pdo(): PDO {
     if (!self::$pdo) {
-      $env = dd_env_db_path();
       $install = dd_read_install();
-      $initial = $env ?: (isset($install['dbPath']) && is_string($install['dbPath']) ? $install['dbPath'] : DD_DATA . '/site.db');
-      self::open($initial);
+      if (!isset($install['database']) || !is_array($install['database'])) {
+        throw new DdHttpError(503, 'MySQL is not configured. Open setup.html and enter your database credentials.');
+      }
+      self::open($install['database']);
     }
     return self::$pdo;
   }
 
   private static function ensureSchema(): void {
-    self::$pdo->exec("
-CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  name          TEXT NOT NULL,
-  email         TEXT NOT NULL UNIQUE,
-  phone         TEXT NOT NULL DEFAULT '',
-  password_hash TEXT NOT NULL,
-  password_salt TEXT NOT NULL,
-  role          TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user')),
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS sessions (
-  token      TEXT PRIMARY KEY,
-  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  expires_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS products (
-  id         TEXT PRIMARY KEY,
-  name       TEXT NOT NULL,
-  meta       TEXT NOT NULL DEFAULT '',
-  tag        TEXT NOT NULL DEFAULT 'Tech',
-  price      INTEGER NOT NULL CHECK(price >= 0),
-  was        INTEGER NOT NULL DEFAULT 0,
-  rating     REAL NOT NULL DEFAULT 4.5,
-  stock      INTEGER NOT NULL DEFAULT 10,
-  img        TEXT NOT NULL DEFAULT 'assets/img/product-mouse.jpg',
-  active     INTEGER NOT NULL DEFAULT 1,
-  reviews    INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS orders (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  customer_name TEXT NOT NULL,
-  phone         TEXT NOT NULL DEFAULT '',
-  address       TEXT NOT NULL DEFAULT '',
-  note          TEXT NOT NULL DEFAULT '',
-  items_json    TEXT NOT NULL,
-  total         INTEGER NOT NULL CHECK(total >= 0),
-  payment       TEXT NOT NULL DEFAULT 'cod',
-  coupon_code   TEXT NOT NULL DEFAULT '',
-  discount      INTEGER NOT NULL DEFAULT 0,
-  delivery_method TEXT NOT NULL DEFAULT 'standard',
-  status        TEXT NOT NULL DEFAULT 'pending'
-                CHECK(status IN ('pending','confirmed','shipped','delivered','cancelled')),
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS addresses (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  label      TEXT NOT NULL DEFAULT 'Home',
-  name       TEXT NOT NULL,
-  phone      TEXT NOT NULL,
-  line       TEXT NOT NULL,
-  city       TEXT NOT NULL DEFAULT '',
-  state      TEXT NOT NULL DEFAULT '',
-  pincode    TEXT NOT NULL DEFAULT '',
-  is_default INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS inquiries (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  name       TEXT NOT NULL,
-  phone      TEXT NOT NULL DEFAULT '',
-  need       TEXT NOT NULL DEFAULT '',
-  budget     TEXT NOT NULL DEFAULT '',
-  message    TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS coupons (
-  code       TEXT PRIMARY KEY,
-  type       TEXT NOT NULL DEFAULT 'percent' CHECK(type IN ('percent','flat')),
-  value      INTEGER NOT NULL CHECK(value > 0),
-  min_order  INTEGER NOT NULL DEFAULT 0,
-  active     INTEGER NOT NULL DEFAULT 1,
-  used       INTEGER NOT NULL DEFAULT 0,
-  max_uses   INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS store_settings (
-  key        TEXT PRIMARY KEY,
-  value      TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS reviews (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  name       TEXT NOT NULL DEFAULT 'Customer',
-  rating     INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
-  title      TEXT NOT NULL DEFAULT '',
-  body       TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(product_id, user_id)
-);
-CREATE INDEX IF NOT EXISTS idx_sessions_user   ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_orders_user     ON orders(user_id);
-CREATE INDEX IF NOT EXISTS idx_orders_status   ON orders(status);
-CREATE INDEX IF NOT EXISTS idx_orders_created  ON orders(created_at);
-CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id);
-CREATE INDEX IF NOT EXISTS idx_addresses_user   ON addresses(user_id);
-");
+    $schemas = [
+      "CREATE TABLE IF NOT EXISTS users (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(80) NOT NULL,
+        username VARCHAR(64) NOT NULL,
+        email VARCHAR(190) NOT NULL,
+        phone VARCHAR(32) NOT NULL DEFAULT '',
+        password_hash VARCHAR(255) NOT NULL,
+        password_salt VARCHAR(32) NOT NULL DEFAULT 'bcrypt',
+        role VARCHAR(16) NOT NULL DEFAULT 'user',
+        email_otp_hash VARCHAR(255) NULL,
+        email_otp_expires_at DATETIME NULL,
+        email_otp_attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_users_username (username),
+        UNIQUE KEY uq_users_email (email)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+      "CREATE TABLE IF NOT EXISTS sessions (
+        token CHAR(64) NOT NULL PRIMARY KEY,
+        user_id BIGINT UNSIGNED NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NOT NULL,
+        KEY idx_sessions_user (user_id),
+        CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+      "CREATE TABLE IF NOT EXISTS products (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        category_id BIGINT UNSIGNED NULL,
+        name VARCHAR(190) NOT NULL,
+        meta VARCHAR(255) NOT NULL DEFAULT '',
+        tag VARCHAR(80) NOT NULL DEFAULT 'Tech',
+        price BIGINT NOT NULL DEFAULT 0,
+        was BIGINT NOT NULL DEFAULT 0,
+        rating DECIMAL(3,2) NOT NULL DEFAULT 4.5,
+        stock INT NOT NULL DEFAULT 10,
+        img VARCHAR(255) NOT NULL DEFAULT 'assets/img/product-mouse.jpg',
+        active TINYINT(1) NOT NULL DEFAULT 1,
+        reviews INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_products_active (active),
+        KEY idx_products_category (category_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+      "CREATE TABLE IF NOT EXISTS categories (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(80) NOT NULL,
+        slug VARCHAR(96) NOT NULL,
+        description VARCHAR(255) NOT NULL DEFAULT '',
+        active TINYINT(1) NOT NULL DEFAULT 1,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_categories_name (name),
+        UNIQUE KEY uq_categories_slug (slug),
+        KEY idx_categories_active_order (active, sort_order, name)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+      "CREATE TABLE IF NOT EXISTS orders (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT UNSIGNED NULL,
+        customer_name VARCHAR(120) NOT NULL,
+        phone VARCHAR(32) NOT NULL DEFAULT '',
+        address TEXT NOT NULL,
+        note TEXT NOT NULL,
+        items_json MEDIUMTEXT NOT NULL,
+        total BIGINT NOT NULL DEFAULT 0,
+        payment VARCHAR(16) NOT NULL DEFAULT 'cod',
+        coupon_code VARCHAR(20) NOT NULL DEFAULT '',
+        discount BIGINT NOT NULL DEFAULT 0,
+        delivery_method VARCHAR(16) NOT NULL DEFAULT 'standard',
+        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        invoice_token_hash CHAR(64) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_orders_user (user_id),
+        KEY idx_orders_status (status),
+        KEY idx_orders_created (created_at),
+        CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+      "CREATE TABLE IF NOT EXISTS addresses (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT UNSIGNED NOT NULL,
+        label VARCHAR(24) NOT NULL DEFAULT 'Home',
+        name VARCHAR(120) NOT NULL,
+        phone VARCHAR(32) NOT NULL,
+        line VARCHAR(255) NOT NULL,
+        city VARCHAR(100) NOT NULL DEFAULT '',
+        state VARCHAR(100) NOT NULL DEFAULT '',
+        pincode VARCHAR(20) NOT NULL DEFAULT '',
+        is_default TINYINT(1) NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_addresses_user (user_id),
+        CONSTRAINT fk_addresses_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+      "CREATE TABLE IF NOT EXISTS inquiries (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(120) NOT NULL,
+        phone VARCHAR(32) NOT NULL DEFAULT '',
+        need VARCHAR(160) NOT NULL DEFAULT '',
+        budget VARCHAR(80) NOT NULL DEFAULT '',
+        message TEXT NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+      "CREATE TABLE IF NOT EXISTS coupons (
+        code VARCHAR(20) NOT NULL PRIMARY KEY,
+        type VARCHAR(16) NOT NULL DEFAULT 'percent',
+        value BIGINT NOT NULL DEFAULT 1,
+        min_order BIGINT NOT NULL DEFAULT 0,
+        active TINYINT(1) NOT NULL DEFAULT 1,
+        used BIGINT NOT NULL DEFAULT 0,
+        max_uses BIGINT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+      "CREATE TABLE IF NOT EXISTS store_settings (
+        `key` VARCHAR(80) NOT NULL PRIMARY KEY,
+        value TEXT NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+      "CREATE TABLE IF NOT EXISTS reviews (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        product_id VARCHAR(64) NOT NULL,
+        user_id BIGINT UNSIGNED NULL,
+        name VARCHAR(120) NOT NULL DEFAULT 'Customer',
+        rating TINYINT UNSIGNED NOT NULL,
+        title VARCHAR(80) NOT NULL DEFAULT '',
+        body TEXT NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_review_user (product_id, user_id),
+        KEY idx_reviews_product (product_id),
+        CONSTRAINT fk_reviews_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+        CONSTRAINT fk_reviews_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+    ];
+    foreach ($schemas as $schema) self::$pdo->exec($schema);
   }
 
   private static function runMigrations(): void {
-    $cols = static function (string $table): array {
-      $rows = self::$pdo->query("PRAGMA table_info($table)")->fetchAll();
-      return array_column($rows, 'name');
+    $columns = static function (string $table): array {
+      $stmt = self::$pdo->prepare('SHOW COLUMNS FROM `' . $table . '`');
+      $stmt->execute();
+      return array_column($stmt->fetchAll(), 'Field');
     };
-    $p = $cols('products');
-    if (!in_array('reviews', $p, true)) self::$pdo->exec("ALTER TABLE products ADD COLUMN reviews INTEGER NOT NULL DEFAULT 0");
-    $o = $cols('orders');
-    if (!in_array('payment', $o, true))     self::$pdo->exec("ALTER TABLE orders ADD COLUMN payment TEXT NOT NULL DEFAULT 'cod'");
-    if (!in_array('coupon_code', $o, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN coupon_code TEXT NOT NULL DEFAULT ''");
-    if (!in_array('discount', $o, true))    self::$pdo->exec("ALTER TABLE orders ADD COLUMN discount INTEGER NOT NULL DEFAULT 0");
-    if (!in_array('delivery_method', $o, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN delivery_method TEXT NOT NULL DEFAULT 'standard'");
+    $users = $columns('users');
+    if (!in_array('username', $users, true)) {
+      self::$pdo->exec('ALTER TABLE users ADD COLUMN username VARCHAR(64) NULL AFTER name');
+      self::$pdo->exec("UPDATE users SET username = CONCAT('user', id) WHERE username IS NULL OR username = ''");
+      self::$pdo->exec('ALTER TABLE users MODIFY username VARCHAR(64) NOT NULL');
+      self::$pdo->exec('ALTER TABLE users ADD UNIQUE KEY uq_users_username (username)');
+    }
+    $users = $columns('users');
+    if (!in_array('email_otp_hash', $users, true)) self::$pdo->exec('ALTER TABLE users ADD COLUMN email_otp_hash VARCHAR(255) NULL');
+    if (!in_array('email_otp_expires_at', $users, true)) self::$pdo->exec('ALTER TABLE users ADD COLUMN email_otp_expires_at DATETIME NULL');
+    if (!in_array('email_otp_attempts', $users, true)) self::$pdo->exec('ALTER TABLE users ADD COLUMN email_otp_attempts TINYINT UNSIGNED NOT NULL DEFAULT 0');
+
+    $orders = $columns('orders');
+    if (!in_array('invoice_token_hash', $orders, true)) self::$pdo->exec('ALTER TABLE orders ADD COLUMN invoice_token_hash CHAR(64) NULL AFTER status');
+
+    $products = $columns('products');
+    if (!in_array('category_id', $products, true)) self::$pdo->exec('ALTER TABLE products ADD COLUMN category_id BIGINT UNSIGNED NULL AFTER id');
+    $categoryIndexes = self::$pdo->query("SHOW INDEX FROM products WHERE Key_name = 'idx_products_category'")->fetchAll();
+    if (!$categoryIndexes) self::$pdo->exec('ALTER TABLE products ADD INDEX idx_products_category (category_id)');
+    $categoryForeignKeys = self::$pdo->query("SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'category_id'
+        AND REFERENCED_TABLE_NAME = 'categories'")->fetchAll();
+    if (!$categoryForeignKeys) self::$pdo->exec('ALTER TABLE products ADD CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE RESTRICT');
+
+    $defaults = [
+      ['Tech', 'tech', 'Technology and electronics', 10],
+      ['Home & Living', 'home-living', 'Home, decor, and everyday living', 20],
+      ['Other', 'other', 'Products in other categories', 1000],
+    ];
+    $insertCategory = self::$pdo->prepare('INSERT IGNORE INTO categories (name,slug,description,sort_order) VALUES (?,?,?,?)');
+    foreach ($defaults as [$name, $slug, $description, $sortOrder]) $insertCategory->execute([$name, $slug, $description, $sortOrder]);
+
+    $legacyTags = self::$pdo->query("SELECT DISTINCT COALESCE(NULLIF(TRIM(tag), ''), 'Other') AS name FROM products")->fetchAll(PDO::FETCH_COLUMN);
+    $findCategory = self::$pdo->prepare('SELECT id FROM categories WHERE name = ?');
+    foreach ($legacyTags as $tag) {
+      $name = mb_substr(trim((string) $tag) ?: 'Other', 0, 80);
+      $slug = strtolower(trim((string) preg_replace('/[^A-Za-z0-9]+/', '-', iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name) ?: $name), '-'));
+      if ($slug === '') $slug = 'category-' . substr(hash('sha256', $name), 0, 10);
+      $findCategory->execute([$name]);
+      if ($findCategory->fetchColumn()) continue;
+      $slugExists = self::$pdo->prepare('SELECT 1 FROM categories WHERE slug = ?');
+      $slugExists->execute([$slug]);
+      if ($slugExists->fetchColumn()) $slug = substr($slug, 0, 82) . '-' . substr(hash('sha256', $name), 0, 10);
+      $insertCategory->execute([$name, mb_substr($slug, 0, 96), '', 500]);
+    }
+    self::$pdo->exec("UPDATE products p JOIN categories c ON c.name = COALESCE(NULLIF(TRIM(p.tag), ''), 'Other')
+      SET p.category_id = c.id WHERE p.category_id IS NULL");
+    self::$pdo->exec("UPDATE products SET tag = 'Other' WHERE tag IS NULL OR TRIM(tag) = ''");
   }
 }
 
 function dd_db(): PDO { return DdDb::pdo(); }
-function dd_db_path(): string { DdDb::pdo(); return DdDb::$path; }
+function dd_db_info(): array {
+  $config = DdDb::$config ?: (dd_read_install()['database'] ?? []);
+  $counts = [];
+  foreach (['users', 'products', 'orders', 'reviews', 'coupons', 'inquiries'] as $table) {
+    $counts[$table] = (int) dd_db()->query("SELECT COUNT(*) FROM `$table`")->fetchColumn();
+  }
+  return [
+    'engine' => 'MySQL / MariaDB',
+    'host' => (string) ($config['host'] ?? ''),
+    'database' => (string) ($config['database'] ?? ''),
+    'username' => (string) ($config['username'] ?? ''),
+    'port' => (int) ($config['port'] ?? 3306),
+    'counts' => $counts,
+  ];
+}

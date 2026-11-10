@@ -56,13 +56,13 @@
         </div>
         <div class="order-items">${items}</div>
         <div class="order-split">
-          <span class="muted" style="font-size:.75rem">${(o.items || []).length} item(s) · incl. delivery &amp; GST${o.coupon_code ? " · " + esc(o.coupon_code) : ""}</span>
+          <span class="muted" style="font-size:.75rem">${(o.items || []).length} item(s) · includes delivery${o.coupon_code ? " · " + esc(o.coupon_code) : ""}</span>
           <span class="order-total">${inr(o.total)}</span>
         </div>
         ${progressHTML(o.status)}
         <div class="order-foot">
           <a class="order-help" href="${help}" target="_blank" rel="noopener">Issue with this order? Chat →</a>
-          <a class="reorder-btn invoice-link" href="invoice.html?id=${o.id}">⬇ Invoice</a>
+          <a class="reorder-btn invoice-link" href="invoice.html?id=${o.id}">⬇ Bill</a>
           <button class="reorder-btn" data-reorder='${JSON.stringify((o.items || []).map(i => ({ id: i.id, qty: i.qty }))).replace(/'/g, "&apos;")}'>↺ Order again</button>
           ${canCancel ? `<button class="cancel-order-btn" data-cancel-order="${o.id}" type="button">Cancel order</button>` : ""}
         </div>
@@ -290,7 +290,7 @@
   $("#passwordForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const cur = $("#pwCurrent").value, nw = $("#pwNew").value, cf = $("#pwConfirm").value;
-    if (nw.length < 6) { toast("New password must be at least 6 characters"); return; }
+    if (nw.length < 8) { toast("New password must be at least 8 characters"); return; }
     if (nw !== cf) { toast("New passwords don’t match"); $("#pwConfirm").focus(); return; }
     const btn = e.submitter || e.target.querySelector('button[type="submit"]');
     btn.disabled = true;

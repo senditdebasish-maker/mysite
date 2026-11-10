@@ -23,7 +23,7 @@ function dd_render_product(string $id, array $req): array {
   $imgAbs = $base . '/' . ltrim((string) $p['img'], '/');
   $url = $base . '/product/' . $p['id'];
   $title = $p['name'] . ' — ' . dd_fmt_inr($p['price']) . ' | The Shelf · debasish.';
-  $desc = $p['name'] . ' — ' . $p['meta'] . '. ' . dd_fmt_inr($p['price']) . ' (GST included). Free delivery above ₹999 · COD & UPI on delivery · 7-day easy returns.';
+  $desc = $p['name'] . ' — ' . $p['meta'] . '. ' . dd_fmt_inr($p['price']) . '. Delivery options and charges are shown at checkout · COD & UPI on delivery.';
   $jsonld = json_encode([
     '@context' => 'https://schema.org', '@type' => 'Product',
     'name' => $p['name'], 'sku' => strtoupper($p['id']), 'image' => $imgAbs,
@@ -76,16 +76,17 @@ function dd_product_main(): void {
       $headers[strtolower(str_replace('_', '-', substr($k, 5)))] = $v;
     }
   }
-  $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
-        || ((int) ($_SERVER['SERVER_PORT'] ?? 0) === 443);
+  $https = dd_request_is_https();
   $req = ['method' => $_SERVER['REQUEST_METHOD'] ?? 'GET', 'headers' => $headers, 'https' => $https];
   $id = (string) ($_GET['id'] ?? '');
-  $resp = dd_render_product($id, $req);
+  try {
+    $resp = dd_render_product($id, $req);
+  } catch (Throwable $e) {
+    error_log('[product] ' . $e);
+    $resp = ['status' => 503, 'headers' => ['Cache-Control' => 'no-store'], 'body' => 'Service temporarily unavailable.', 'content_type' => 'text/plain; charset=utf-8'];
+  }
   http_response_code($resp['status']);
-  header('X-Content-Type-Options: nosniff');
-  header('X-Frame-Options: SAMEORIGIN');
-  header('Referrer-Policy: strict-origin-when-cross-origin');
+  dd_emit_security_headers($https);
   foreach (($resp['headers'] ?? []) as $n => $v) header("$n: $v");
   header('Content-Type: ' . ($resp['content_type'] ?? 'text/html; charset=utf-8'));
   echo $resp['body'];

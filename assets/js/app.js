@@ -105,7 +105,7 @@ $("#planGrid").innerHTML = PLANS.map(p => `
   <article class="plan ${p.popular ? "plan-popular" : ""}">
     ${p.popular ? '<span class="plan-badge">Most Popular</span>' : ''}
     <p class="plan-name">${p.name}</p>
-    <div class="plan-price">${p.price}<span> ${p.per} + GST</span></div>
+    <div class="plan-price">${p.price}<span> ${p.per}</span></div>
     <p class="plan-desc">${p.desc}</p>
     <ul>${p.features.map(f => `<li>${check}<span>${f}</span></li>`).join("")}</ul>
     <a class="plan-cta" href="${waLink(p.wa)}" target="_blank" rel="noopener">Choose ${p.name} — order on WhatsApp</a>
@@ -138,7 +138,7 @@ $$("[data-goto]").forEach(btn => btn.addEventListener("click", () => { closeCart
 
 function setActiveSection(id){
   $$(".nav-link").forEach(l => {
-    const target = l.dataset.goto ?? (l.getAttribute("href") === "index.html" ? "home" : null);
+    const target = l.dataset.goto ?? (["index.html", "./", "/"].includes(l.getAttribute("href")) ? "home" : null);
     l.classList.toggle("is-active", target === id);
   });
   $$(".rail-dot").forEach(d => d.classList.toggle("is-active", d.dataset.goto === id));

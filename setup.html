@@ -18,7 +18,7 @@
 
 <header class="setup-top">
   <div class="setup-top-inner">
-    <a class="wordmark" href="index.html" aria-label="debasish. — home">debasish<span class="wm-dot">.</span></a>
+    <a class="wordmark" href="./" aria-label="debasish. — home">debasish<span class="wm-dot">.</span></a>
     <div class="setup-top-right">
       <span class="setup-pill" id="setupPill">Checking…</span>
       <a class="btn btn-ghost btn-sm" href="admin.html" id="setupAdminLink" hidden>Admin dashboard →</a>
@@ -33,20 +33,19 @@
     <p id="setupLede">Everything on this page can be changed later from <strong>Admin → Storefront</strong> and here (sign in as admin). Nothing goes live until you press <strong>Complete setup</strong>.</p>
   </div>
 
-  <!-- Shown when the setup API can't be reached — usually a static host or stale deploy -->
+  <!-- Shown when the XAMPP API can't be reached -->
   <div class="setup-trouble" id="setupTrouble" hidden role="alert">
     <strong>How to fix this</strong>
     <p id="troubleMsg"></p>
     <p class="setup-hint">The setup API this page needs is: <a class="mono" id="troubleStatusUrl" href="#" target="_blank" rel="noopener">—</a></p>
     <ol class="setup-fixlist">
-      <li><strong>Serve it with Apache + PHP</strong>, not a static host: GitHub Pages / Netlify / <code>python -m http.server</code> can show this page but can never run the installer. Local test: <code>php -S localhost:8000 serve.php</code>.</li>
-      <li><strong>Upload the whole repo</strong> — <code>setup.html</code>, <code>api/</code> and <code>.htaccess</code> must come from the same version.</li>
-      <li><strong>If files were replaced recently</strong>, hard-refresh (Ctrl+F5) and retry — stale JS can point at old routes.</li>
-      <li><strong>Behind a proxy or subpath?</strong> Forward <code>/api/*</code> to the app untouched, or open <code class="mono">/setup.html?api=/your/subpath/api</code>.</li>
+      <li>Start <strong>Apache</strong> in the XAMPP Control Panel and open <code>http://localhost/mysite/setup.html</code>.</li>
+      <li>Confirm that <code>api/</code>, <code>assets/</code> and the project <code>.htaccess</code> are inside <code>C:\xampp\htdocs\mysite</code>.</li>
+      <li>For MySQL errors, start MySQL in XAMPP and use the exact database name, host, user and password assigned to your existing database.</li>
     </ol>
     <div class="setup-fixactions">
       <button class="btn btn-primary" id="troubleRetry" type="button">Retry connection</button>
-      <a class="btn btn-ghost" href="https://github.com/senditdebasish-maker/mysite" target="_blank" rel="noopener">Get the latest code →</a>
+      <a class="btn btn-ghost" href="http://localhost/phpmyadmin/" target="_blank" rel="noopener">Open phpMyAdmin →</a>
     </div>
   </div>
 
@@ -58,25 +57,37 @@
         <span class="setup-num">1</span>
         <div>
           <h2 id="h-db">Database</h2>
-          <p class="setup-sub">Where your products, orders, customers and reviews live.</p>
+          <p class="setup-sub">Create a new MySQL database or connect to one you already have.</p>
         </div>
       </div>
 
       <div class="setup-kv">
         <div><span>Engine</span><strong id="dbEngine">—</strong></div>
-        <div><span>Current file</span><strong class="mono" id="dbCurrent">—</strong></div>
-        <div><span>Size</span><strong id="dbSize">—</strong></div>
+        <div><span>Server</span><strong class="mono" id="dbCurrent">—</strong></div>
+        <div><span>Database</span><strong class="mono" id="dbSize">—</strong></div>
         <div><span>Holds</span><strong id="dbCounts">—</strong></div>
       </div>
 
-      <div class="setup-envlock" id="dbEnvLock" hidden>
-        🔒 The database path is pinned by the <code>DB_PATH</code> environment variable on this server — it can only be changed there. Test &amp; inspect still work.
+      <div class="field-row">
+        <label class="field">MySQL host<input type="text" id="dbHost" value="localhost" required autocomplete="off" /></label>
+        <label class="field">Port<input type="number" id="dbPort" value="3306" min="1" max="65535" required /></label>
       </div>
+      <fieldset class="setup-modes" id="dbConnectionModes">
+        <legend>Database setup</legend>
+        <label class="setup-mode"><input type="radio" name="dbConnectionMode" value="create" checked />
+          <span><strong>Create a new database</strong><small>Creates the named database on this MySQL server. The MySQL user needs permission to create databases.</small></span>
+        </label>
+        <label class="setup-mode"><input type="radio" name="dbConnectionMode" value="existing" />
+          <span><strong>Connect to an existing database</strong><small>Uses the database as-is and keeps its existing app data.</small></span>
+        </label>
+      </fieldset>
 
-      <label class="field" style="margin-top:.7rem">Database file location
-        <input type="text" id="dbPath" autocomplete="off" spellcheck="false" placeholder="/var/lib/mysite/site.db" />
-      </label>
-      <p class="setup-hint">Absolute path, or relative to the app folder. The file and its folder are created if missing. Point it at a mounted volume to survive redeploys.</p>
+      <div class="field-row">
+        <label class="field"><span id="dbNameLabel">New database name</span><input type="text" id="dbName" required autocomplete="off" placeholder="For example, mysite_store" /></label>
+        <label class="field">MySQL username<input type="text" id="dbUser" required autocomplete="username" /></label>
+      </div>
+      <label class="field">MySQL password<input type="password" id="dbPassword" autocomplete="new-password" placeholder="Enter the database user's password" /></label>
+      <p class="setup-hint" id="dbConnectionHint">Creates a new database, then creates the app tables. Existing databases are never overwritten or deleted. Credentials are stored in the protected <code>data/install.json</code> file.</p>
 
       <div class="setup-row">
         <button class="btn btn-ghost btn-sm" id="dbTestBtn" type="button">Test connection</button>
@@ -92,21 +103,38 @@
           <span><strong>Empty store</strong><small>Schema + your admin account only. You add products, coupons and photos yourself.</small></span>
         </label>
       </fieldset>
-      <label class="setup-reset" id="dbResetWrap" hidden><input type="checkbox" id="dbReset" /> I understand — <strong>erase everything currently in that file</strong> and start fresh</label>
-
       <div class="setup-card-foot">
-        <button class="btn btn-ink btn-sm" id="dbApplyBtn" type="button">Apply database</button>
+        <button class="btn btn-ink btn-sm" id="dbApplyBtn" type="button">Connect &amp; prepare tables</button>
         <span class="setup-hint" id="dbApplyHint"></span>
       </div>
     </section>
 
-    <!-- ══════════ STEP 2 · IDENTITY ══════════ -->
-    <section class="setup-card" id="cardSite" aria-labelledby="h-site">
+    <!-- ══════════ STEP 2 · EMAIL OTP ══════════ -->
+    <section class="setup-card" id="cardSmtp" aria-labelledby="h-smtp">
       <div class="setup-card-head">
         <span class="setup-num">2</span>
         <div>
+          <h2 id="h-smtp">Gmail SMTP for email codes</h2>
+          <p class="setup-sub">PHPMailer sends single-use sign-in codes through your Gmail account.</p>
+        </div>
+      </div>
+      <label class="field">Gmail address<input type="email" id="smtpEmail" required autocomplete="email" placeholder="you@gmail.com" /></label>
+      <label class="field">Gmail App Password<input type="password" id="smtpPassword" autocomplete="new-password" placeholder="16-character App Password" /></label>
+      <p class="setup-hint">Use a Google App Password (not your normal Gmail password). Enable 2-Step Verification in your Google account, then create an App Password. This sender credential is stored in protected <code>data/install.json</code>. Test sends an email to this address.</p>
+      <div class="setup-card-foot">
+        <button class="btn btn-ink btn-sm" id="smtpSaveBtn" type="button">Save &amp; test Gmail</button>
+        <span class="setup-saved" id="smtpSaved" hidden>✓ email sent</span>
+        <span class="setup-hint" id="smtpStatus"></span>
+      </div>
+    </section>
+
+    <!-- ══════════ STEP 3 · IDENTITY ══════════ -->
+    <section class="setup-card" id="cardSite" aria-labelledby="h-site">
+      <div class="setup-card-head">
+        <span class="setup-num">3</span>
+        <div>
           <h2 id="h-site">Brand &amp; seller identity</h2>
-          <p class="setup-sub">Printed on GST invoices, used for the store name, and swapped into the contact links across the site.</p>
+          <p class="setup-sub">Used for the store name and contact links. The order bill does not calculate or display taxes.</p>
         </div>
       </div>
 
@@ -116,7 +144,7 @@
       </div>
       <label class="field">Seller address<input type="text" id="siteAddress" maxlength="160" placeholder="14B, Gariahat Road, Kolkata 700029" /></label>
       <div class="field-row">
-        <label class="field">GSTIN<input type="text" id="siteGstin" maxlength="32" class="mono" placeholder="19ABCDE1234F1Z5" /></label>
+        <label class="field">GSTIN (not used on order bills)<input type="text" id="siteGstin" maxlength="32" class="mono" placeholder="Optional" /></label>
         <label class="field">Contact email<input type="email" id="siteEmail" maxlength="120" placeholder="hello@yourdomain.in" /></label>
       </div>
       <div class="field-row">
@@ -131,10 +159,10 @@
       </div>
     </section>
 
-    <!-- ══════════ STEP 3 · ADMIN ══════════ -->
+    <!-- ══════════ STEP 4 · ADMIN ══════════ -->
     <section class="setup-card" id="cardAdmin" aria-labelledby="h-admin">
       <div class="setup-card-head">
-        <span class="setup-num">3</span>
+        <span class="setup-num">4</span>
         <div>
           <h2 id="h-admin">Admin account</h2>
           <p class="setup-sub">The login for the admin dashboard. If the email already exists, its password is updated.</p>
@@ -145,7 +173,10 @@
         <label class="field">Your name<input type="text" id="admName" maxlength="80" placeholder="Debasish Das" autocomplete="name" /></label>
         <label class="field">Phone<input type="text" id="admPhone" maxlength="32" placeholder="+91 98XXX XXXXX" /></label>
       </div>
-      <label class="field">Admin email<input type="email" id="admEmail" maxlength="120" placeholder="you@yourdomain.in" autocomplete="username" /></label>
+      <div class="field-row">
+        <label class="field">Admin username<input type="text" id="admUsername" maxlength="32" placeholder="Choose a username" autocomplete="username" /></label>
+        <label class="field">Admin email<input type="email" id="admEmail" maxlength="120" placeholder="you@yourdomain.in" autocomplete="email" /></label>
+      </div>
       <div class="field-row">
         <label class="field">Password<input type="password" id="admPassword" minlength="8" autocomplete="new-password" placeholder="At least 8 characters" /></label>
         <label class="field">Confirm password<input type="password" id="admConfirm" minlength="8" autocomplete="new-password" placeholder="Repeat it" /></label>
@@ -159,10 +190,10 @@
       </div>
     </section>
 
-    <!-- ══════════ STEP 4 · STOREFRONT ══════════ -->
+    <!-- ══════════ STEP 5 · STOREFRONT ══════════ -->
     <section class="setup-card" id="cardStore" aria-labelledby="h-store">
       <div class="setup-card-head">
-        <span class="setup-num">4</span>
+        <span class="setup-num">5</span>
         <div>
           <h2 id="h-store">Storefront rules</h2>
           <p class="setup-sub">Delivery charges, cash-on-delivery policy and whether the store is open for orders.</p>
@@ -190,24 +221,17 @@
       </div>
     </section>
 
-    <!-- ══════════ STEP 5 · MAINTENANCE ══════════ -->
+    <!-- ══════════ STEP 6 · DATABASE BACKUPS ══════════ -->
     <section class="setup-card" id="cardMaint" aria-labelledby="h-maint">
       <div class="setup-card-head">
-        <span class="setup-num">5</span>
+        <span class="setup-num">6</span>
         <div>
           <h2 id="h-maint">Backups &amp; restore</h2>
-          <p class="setup-sub">Belt and suspenders for a live store — one click downloads everything.</p>
+          <p class="setup-sub">Use phpMyAdmin to export or restore the MySQL database.</p>
         </div>
       </div>
 
-      <div class="setup-maint">
-        <a class="btn btn-ghost btn-sm" id="backupBtn" href="api/admin/backup">⬇ Download database backup</a>
-        <div class="setup-restore">
-          <input type="file" id="restoreFile" accept=".db,application/octet-stream" hidden />
-          <button class="btn btn-ghost btn-sm" id="restoreBtn" type="button">⬆ Restore from backup…</button>
-        </div>
-      </div>
-      <p class="setup-hint">Restore replaces the <em>entire</em> database (orders, customers, everything). A timestamped safety copy of the current file is kept next to it. You will be signed out.</p>
+      <p class="setup-hint">In XAMPP, open <code>http://localhost/phpmyadmin</code>, select your site database, then choose <strong>Export</strong> to download a backup or <strong>Import</strong> to restore one. Hosting panels generally provide the same phpMyAdmin Export/Import tools.</p>
     </section>
 
   </div><!-- /setup-grid -->
@@ -219,12 +243,12 @@
       <p id="finishSub">Completing setup opens the site to the public and locks this wizard behind your admin login.</p>
     </div>
     <div class="setup-finish-actions">
-      <a class="btn btn-ghost" href="index.html" id="finishPreview" hidden>Preview site</a>
+      <a class="btn btn-ghost" href="./" id="finishPreview" hidden>Preview site</a>
       <button class="btn btn-primary btn-lg" id="completeBtn" type="button">Complete setup →</button>
     </div>
   </section>
 
-  <p class="setup-foot">Setup data lives on this server only · nothing is sent anywhere · <a href="index.html">back to site</a></p>
+  <p class="setup-foot">Credentials are used only by this PHP app to access your database and send sign-in codes · <a href="./">back to site</a></p>
 </main>
 
 <script src="assets/js/ui.js"></script>

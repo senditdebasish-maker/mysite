@@ -16,7 +16,9 @@
 
   function visibleProducts() {
     const list = window.DD.products().filter(p =>
-      (filter.cat === "all" || p.tag === filter.cat) &&
+      (filter.cat === "all" || (p.category_id != null
+        ? String(p.category_id) === filter.cat
+        : p.tag === filter.cat)) &&
       priceOk(p) &&
       (!filter.stockOnly || $n(p.stock) > 0) &&
       (!filter.wishlistOnly || wish.has(p.id)) &&
@@ -82,8 +84,16 @@
   function renderCounts() {
     const all = window.DD.products();
     $("#cntAll").textContent  = all.length;
-    $("#cntTech").textContent = all.filter(p => p.tag === "Tech").length;
-    $("#cntHome").textContent = all.filter(p => p.tag === "Home & Living").length;
+    const categories = window.DD.categories();
+    $("#catFilters").innerHTML = `<button class="filter-opt${filter.cat === "all" ? " is-active" : ""}" data-cat="all">All products <span class="filter-count">${all.length}</span></button>` +
+      categories.filter(c => all.some(p => p.category_id != null
+        ? Number(p.category_id) === Number(c.id)
+        : p.tag === c.name)).map(c => {
+          const count = all.filter(p => p.category_id != null
+            ? Number(p.category_id) === Number(c.id)
+            : p.tag === c.name).length;
+          return `<button class="filter-opt${filter.cat === String(c.id ?? c.name) ? " is-active" : ""}" data-cat="${esc(c.id ?? c.name)}">${esc(c.name)} <span class="filter-count">${count}</span></button>`;
+        }).join("");
     $("#wishlistCount").textContent = wish.count();
     $("#wishlistOnly").setAttribute("aria-pressed", String(filter.wishlistOnly));
     $("#wishlistOnly").classList.toggle("is-active", filter.wishlistOnly);
@@ -231,5 +241,6 @@
     const m = location.hash.match(/^#p-(.+)$/);
     if (m && findProduct(m[1])) openQuickView(m[1]);
   });
+  window.addEventListener("dd:catalog-changed", () => { renderCounts(); renderGrid(); });
   window.addEventListener("dd:products-changed", () => { renderDeals(); renderGrid(); });
 })();

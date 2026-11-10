@@ -37,7 +37,7 @@
     const method = state().delivery_method;
     const delivery = method === "express" ? n(cfg.expressFee) : (sub >= n(cfg.freeAt) ? 0 : (sub > 0 ? n(cfg.deliveryFee) : 0));
     const total = Math.max(0, sub - discount + delivery);
-    return { sub, coupon, discount, delivery, total, gst: Math.round(total * 18 / 118), count: DD.cart.count() };
+    return { sub, coupon, discount, delivery, total, count: DD.cart.count() };
   };
 
   /* ═══════════ render ═══════════ */
@@ -49,7 +49,7 @@
   }
 
   function renderTotals() {
-    const { sub, coupon, discount, delivery, total, gst, count } = totals();
+    const { sub, coupon, discount, delivery, total, count } = totals();
     $1("#sumSub").textContent = fmtINR(sub);
     const dRow = $1("#sumDiscountRow");
     dRow.hidden = !(coupon && discount > 0);
@@ -59,7 +59,6 @@
     $1("#sumMethodLabel").textContent = method === "express" ? "(express)" : delivery === 0 ? "(standard · free)" : "(standard)";
     $1("#sumDelivery").textContent = delivery === 0 ? "FREE" : fmtINR(delivery);
     $1("#sumTotal").textContent = fmtINR(total);
-    $1("#sumGst").textContent = fmtINR(gst);
     $1("#placeOrderLabel").textContent = count ? `Place order · ${fmtINR(total)}` : "Your cart is empty";
 
     // standard-fee callouts
@@ -306,6 +305,8 @@
     DD.cart.clear();
     DD.clearCoupon();
     stash({ ...placed, payment: placed.payment || pay, delivery_method: placed.delivery_method || fields.delivery_method, name, phone, address, signedIn: !!me });
-    location.href = `order-success.html?order=${placed.id}`;
+    const successParams = new URLSearchParams({ order: String(placed.id) });
+    if (placed.invoice_token) successParams.set("token", placed.invoice_token);
+    location.href = `order-success.html?${successParams.toString()}`;
   });
 })();

@@ -19,7 +19,7 @@
   <!-- ══════════ SIDEBAR ══════════ -->
   <aside class="sidebar" aria-label="Admin navigation">
     <div class="side-brand">
-      <a class="wordmark" href="index.html" aria-label="Debasish Das — home">debasish<span class="wm-dot">.</span></a>
+      <a class="wordmark" href="./" aria-label="Debasish Das — home">debasish<span class="wm-dot">.</span></a>
       <span class="admin-chip">Admin</span>
     </div>
 
@@ -54,7 +54,7 @@
 
     <div class="side-spacer"></div>
     <div class="side-foot">
-      <a class="side-link" href="index.html" target="_blank" rel="noopener">
+      <a class="side-link" href="./" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4L11 13"/><path d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
         <span>View site</span>
       </a>
@@ -131,6 +131,13 @@
         <a class="mini-btn" id="ordersCsvLink" href="api/admin/orders.csv" download>⬇ Export CSV</a>
         <button class="mini-btn" id="ordersCsvClear" type="button" hidden>Clear dates ✕</button>
       </div>
+      <div class="orders-pagination">
+        <span class="muted" id="ordersPageSummary" aria-live="polite">Loading orders…</span>
+        <span>
+          <button class="mini-btn" id="ordersPrev" type="button" disabled>← Newer</button>
+          <button class="mini-btn" id="ordersNext" type="button" disabled>Older →</button>
+        </span>
+      </div>
       <div class="bulk-bar" id="bulkBar" hidden>
         <label class="bulk-check"><input type="checkbox" id="bulkSelectAll" /> Select all shown</label>
         <span class="bulk-count"><strong id="bulkCount">0</strong> selected</span>
@@ -157,12 +164,39 @@
 
     <!-- ─────── PANE: PRODUCTS ─────── -->
     <section class="pane" id="pane-products" data-hidden="true">
+      <div class="panel category-manager">
+        <div class="panel-head">
+          <div><h2 class="panel-title">Product categories</h2><p class="muted" style="margin:.15rem 0 0;font-size:.75rem">Organize the catalogue. Products must be moved before a category with products can be removed.</p></div>
+        </div>
+        <form class="category-create" id="categoryCreateForm">
+          <label class="field">New category<input id="categoryName" maxlength="80" placeholder="e.g. Accessories" required /></label>
+          <label class="field">Description<input id="categoryDescription" maxlength="255" placeholder="Short customer-facing category description" /></label>
+          <button type="submit" class="btn btn-ink btn-sm" id="categoryCreateButton">Add category</button>
+        </form>
+        <div class="category-list" id="categoryList" aria-live="polite"></div>
+      </div>
       <div style="display:flex; justify-content:space-between; align-items:center; gap:.6rem; margin-bottom:.6rem; flex-wrap:wrap">
         <p class="muted" style="margin:0; font-size:.8rem">Stock changes here update the live store instantly. Sold-out items show as “Sold out” and can’t be added to cart.</p>
         <span style="display:flex; gap:.4rem; align-items:center">
           <a class="mini-btn" href="api/admin/products.csv" download>⬇ Export CSV</a>
           <button class="btn btn-ink btn-sm" id="addProductBtn" type="button">+ Add product</button>
         </span>
+      </div>
+      <div class="orders-toolbar">
+        <input type="search" id="productSearch" class="orders-search" placeholder="Search item name, tag, details or ID…" aria-label="Search products" />
+        <label class="orders-date">Category
+          <select id="productCategoryFilter" class="status-select" aria-label="Filter products by category"><option value="all">All categories</option></select>
+        </label>
+        <label class="orders-date">Sort
+          <select id="productSort" class="status-select" aria-label="Sort products">
+            <option value="name">Name A–Z</option>
+            <option value="price-low">Price: low to high</option>
+            <option value="price-high">Price: high to low</option>
+            <option value="stock-low">Stock: low to high</option>
+            <option value="newest">Recently added</option>
+          </select>
+        </label>
+        <span class="muted" id="productResultCount" aria-live="polite"></span>
       </div>
       <div class="chip-row" id="productFilterChips" aria-label="Filter products by stock" style="margin-bottom:.6rem">
         <button class="chip is-active" data-pfilter="all">All</button>
@@ -259,10 +293,15 @@
 
     <!-- ─────── PANE: CUSTOMERS ─────── -->
     <section class="pane" id="pane-customers" data-hidden="true">
+      <div class="orders-toolbar">
+        <input type="search" id="customerSearch" class="orders-search" placeholder="Search name, username, email, phone or ID…" aria-label="Search customers" />
+        <a class="mini-btn" href="api/admin/customers.csv" download>⬇ Export customers</a>
+        <span class="muted" id="customerResultCount" aria-live="polite"></span>
+      </div>
       <div class="panel">
         <div class="tbl-wrap">
           <table class="tbl">
-            <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Orders</th><th>Revenue</th><th>Joined</th></tr></thead>
+            <thead><tr><th>Customer</th><th>Email</th><th>Phone</th><th>Orders</th><th>Revenue</th><th>Last order</th><th>Joined</th><th></th></tr></thead>
             <tbody id="customersBody"></tbody>
           </table>
         </div>
@@ -278,16 +317,23 @@
     <section class="pane" id="pane-reports" data-hidden="true">
       <div class="stat-grid" style="margin-bottom:.85rem">
         <div class="stat-card"><span class="stat-label">Avg order value</span><span class="stat-num" id="rpAov">₹0</span><span class="stat-foot" id="rpOrdersAll">0 orders all time</span></div>
-        <div class="stat-card"><span class="stat-label">Units moved (30d)</span><span class="stat-num" id="rpUnits">0</span><span class="stat-foot good">non-cancelled</span></div>
-        <div class="stat-card"><span class="stat-label">Coupon orders (30d)</span><span class="stat-num" id="rpCouponOrders">0</span><span class="stat-foot" id="rpCouponSaved">₹0 saved by customers</span></div>
-        <div class="stat-card"><span class="stat-label">COD / UPI (30d)</span><span class="stat-num" id="rpPaySplit">0 / 0</span><span class="stat-foot">orders by payment mode</span></div>
+        <div class="stat-card"><span class="stat-label">Order revenue · selected period</span><span class="stat-num" id="rpRevenue">₹0</span><span class="stat-foot" id="rpPeriodOrders">0 orders · includes delivery</span></div>
+        <div class="stat-card"><span class="stat-label">Units sold · selected period</span><span class="stat-num" id="rpUnits">0</span><span class="stat-foot good">non-cancelled orders</span></div>
+        <div class="stat-card"><span class="stat-label">Open / cancelled</span><span class="stat-num" id="rpPipeline">0 / 0</span><span class="stat-foot" id="rpCouponSaved">₹0 coupon savings</span></div>
       </div>
 
+      <div class="orders-toolbar report-toolbar">
+        <label class="orders-date">From <input type="date" id="rpFrom" /></label>
+        <label class="orders-date">To <input type="date" id="rpTo" /></label>
+        <button class="mini-btn" id="rpApply" type="button">Apply dates</button>
+        <a class="mini-btn" id="rpCsvLink" href="api/admin/report.csv" download>⬇ Export report CSV</a>
+        <span class="muted" id="rpPeriodLabel" aria-live="polite"></span>
+      </div>
       <div class="dash-grid" style="grid-template-columns:1.15fr .85fr">
         <div class="panel">
           <div class="panel-head">
-            <h2 class="panel-title">Revenue — last 14 days</h2>
-            <span class="muted" style="font-size:.8rem" id="rpTotal14">₹0 in 14 days</span>
+            <h2 class="panel-title">Daily sales</h2>
+            <span class="muted" style="font-size:.8rem" id="rpTotal14">₹0</span>
           </div>
           <div class="rp-chart" id="rpChart" role="img" aria-label="Daily revenue bar chart"></div>
           <div class="rp-axis"><span id="rpChartStart">—</span><span id="rpChartEnd">—</span></div>
@@ -295,7 +341,7 @@
         </div>
         <div>
           <div class="panel" style="margin-bottom:.8rem">
-            <div class="panel-head"><h2 class="panel-title">Top products · 30 days</h2></div>
+            <div class="panel-head"><h2 class="panel-title">Top products · selected period</h2></div>
             <div class="tbl-wrap">
               <table class="tbl">
                 <thead><tr><th>Product</th><th>Units</th><th>Revenue</th></tr></thead>
@@ -303,8 +349,17 @@
               </table>
             </div>
           </div>
+          <div class="panel" style="margin-bottom:.8rem">
+            <div class="panel-head"><h2 class="panel-title">Item sales by category</h2></div>
+            <div class="tbl-wrap">
+              <table class="tbl">
+                <thead><tr><th>Category</th><th>Units</th><th>Sales</th><th>Share</th></tr></thead>
+                <tbody id="rpCategoryBody"></tbody>
+              </table>
+            </div>
+          </div>
           <div class="panel">
-            <div class="panel-head"><h2 class="panel-title">Payment mix · 30 days</h2></div>
+            <div class="panel-head"><h2 class="panel-title">Payment mix · selected period</h2></div>
             <div class="rp-pay">
               <div class="rp-pay-row"><span class="rp-pay-label">COD</span><div class="rp-pay-bar"><div class="rp-pay-fill cod" id="rpBarCod"></div></div><span class="rp-pay-val" id="rpValCod">0 orders</span></div>
               <div class="rp-pay-row"><span class="rp-pay-label">UPI</span><div class="rp-pay-bar"><div class="rp-pay-fill upi" id="rpBarUpi"></div></div><span class="rp-pay-val" id="rpValUpi">0 orders</span></div>
@@ -324,19 +379,16 @@
     <div class="editor-grid">
       <label class="field full">Name<input id="pf-name" placeholder="Aura TKL Keyboard 68" required /></label>
       <label class="field full">Short meta<input id="pf-meta" placeholder="Tri-mode · linear red switches" /></label>
-      <label class="field">Tag
-        <select id="pf-tag">
-          <option>Tech</option>
-          <option>Home &amp; Living</option>
-          <option>Other</option>
-        </select>
+      <label class="field">Category
+        <select id="pf-category" required></select>
       </label>
-      <label class="field">Image
-        <select id="pf-img"></select>
+      <label class="field full">Image path or HTTPS URL
+        <input id="pf-img" list="productImageChoices" maxlength="255" placeholder="assets/img/product-mouse.jpg" />
+        <datalist id="productImageChoices"></datalist>
       </label>
       <label class="field">Price ₹<input id="pf-price" type="number" min="0" step="1" required /></label>
       <label class="field">M.R.P. ₹ <span class="co-opt">(struck-out)</span><input id="pf-was" type="number" min="0" step="1" /></label>
-      <label class="field">Stock<input id="pf-stock" type="number" min="0" step="1" required /></label>
+      <label class="field">Stock<input id="pf-stock" type="number" min="0" max="2147483647" step="1" required /></label>
       <label class="field">Rating<input id="pf-rating" type="number" min="0" max="5" step="0.1" /></label>
       <label class="field full" style="flex-direction:row; align-items:center; gap:.5rem; text-transform:none; letter-spacing:0; font-size:.85rem">
         <input type="checkbox" id="pf-active" checked style="width:18px;height:18px" /> Visible in the live store
@@ -347,6 +399,45 @@
       <button type="submit" class="btn btn-ink btn-sm" id="editorSave">Save product</button>
     </div>
   </form>
+</div>
+
+<div class="editor-backdrop" id="categoryEditor" hidden role="dialog" aria-modal="true" aria-labelledby="categoryEditorTitle">
+  <form class="editor-card" id="categoryForm">
+    <h2 id="categoryEditorTitle">Edit category</h2>
+    <label class="field">Name<input id="cf-name" maxlength="80" required /></label>
+    <label class="field" style="margin-top:.55rem">Description<input id="cf-description" maxlength="255" /></label>
+    <div class="editor-grid" style="margin-top:.55rem">
+      <label class="field">Sort order<input id="cf-sort" type="number" min="0" max="100000" step="1" /></label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:.45rem">
+        <input id="cf-active" type="checkbox" style="width:18px;height:18px" /> Active on storefront
+      </label>
+    </div>
+    <p class="muted" id="categoryEditorHint" style="font-size:.75rem"></p>
+    <div class="editor-actions">
+      <button type="button" class="btn btn-ghost btn-sm" id="categoryEditorCancel">Cancel</button>
+      <button type="submit" class="btn btn-ink btn-sm" id="categoryEditorSave">Save category</button>
+    </div>
+  </form>
+</div>
+
+<div class="editor-backdrop" id="customerDetail" hidden role="dialog" aria-modal="true" aria-labelledby="customerDetailTitle">
+  <section class="editor-card customer-detail-card">
+    <div class="panel-head">
+      <div><h2 id="customerDetailTitle">Customer</h2><p class="muted" id="customerDetailMeta"></p></div>
+      <button class="mini-btn" id="customerDetailClose" type="button" aria-label="Close customer details">Close</button>
+    </div>
+    <div class="stat-grid customer-detail-stats">
+      <div class="stat-card"><span class="stat-label">Orders</span><span class="stat-num" id="customerDetailOrders">0</span></div>
+      <div class="stat-card"><span class="stat-label">Net revenue</span><span class="stat-num" id="customerDetailRevenue">₹0</span></div>
+    </div>
+    <div class="panel-head"><h3 class="panel-title">Recent order history</h3></div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>Order</th><th>Items</th><th>Total</th><th>Status</th><th>Placed</th></tr></thead>
+        <tbody id="customerDetailHistory"></tbody>
+      </table>
+    </div>
+  </section>
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

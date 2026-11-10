@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Checkout — Debasish Das · Web Studio &amp; Store</title>
-<meta name="description" content="Secure checkout for The Shelf — COD & UPI on delivery, express delivery available, GST-inclusive honest pricing with a proper invoice." />
+<meta name="description" content="Secure checkout for The Shelf — COD & UPI on delivery, clear order totals, and delivery options." />
 <meta name="robots" content="noindex" />
 <meta name="theme-color" content="#FAF6EF" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23141414'/%3E%3Ctext x='26' y='45' font-family='Georgia,serif' font-weight='700' font-size='38' fill='%23FAF6EF' text-anchor='middle'%3Ed%3C/text%3E%3Ccircle cx='45' cy='43' r='5.5' fill='%23E8542F'/%3E%3C/svg%3E" />
@@ -22,7 +22,7 @@
 
 <!-- ══════════ NAV ══════════ -->
 <header class="co-nav">
-  <a class="wordmark" href="index.html" aria-label="Debasish Das — home">debasish<span class="wm-dot">.</span></a>
+  <a class="wordmark" href="./" aria-label="Debasish Das — home">debasish<span class="wm-dot">.</span></a>
   <span class="co-secure">
     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.4"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
     Secure checkout
@@ -152,7 +152,6 @@
       <div class="co-total-row co-total-discount" id="sumDiscountRow" hidden><span>Coupon <b id="sumCouponCode"></b></span><span>−<span id="sumDiscount">₹0</span></span></div>
       <div class="co-total-row"><span>Delivery <span id="sumMethodLabel">(standard)</span></span><span id="sumDelivery">₹0</span></div>
       <div class="co-total-row co-total-grand"><span>Total</span><strong id="sumTotal">₹0</strong></div>
-      <div class="co-total-row co-gst"><span>Inclusive of 18% GST</span><span id="sumGst">₹0</span></div>
     </div>
 
     <button type="submit" form="checkoutForm" class="co-place" id="placeOrderBtn">
@@ -162,7 +161,7 @@
     <p class="co-place-note">No payment now — COD / UPI on delivery · you’ll get an invoice with your parcel</p>
 
     <div class="co-trust" aria-label="Trust badges">
-      <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>GST invoice</span>
+      <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Order bill</span>
       <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>7-day returns</span>
       <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>COD &amp; UPI</span>
       <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Dispatch in 1–2 days</span>

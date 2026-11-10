@@ -1,16 +1,14 @@
 # ══════════════════════════════════════════════════════════
-# Debasish Das store — Apache + PHP full-stack config
-# Works on InfinityFree, XAMPP (htdocs), cPanel/Apache.
+# Debasish Das store — XAMPP Apache + PHP config
 # Order matters: hard blocks → redirects → dynamic PHP endpoints.
 # ══════════════════════════════════════════════════════════
-# (no Options directive on purpose — some shared hosts 500 on it)
-
 <IfModule mod_rewrite.c>
   RewriteEngine On
 
   # ── 1. never serve sensitive paths ──
-  RewriteRule ^(data|\.git|\.github)(/|$) - [R=404,L]
-  RewriteRule ^(composer(\.json|\.lock)|README\.md)$ - [R=404,L]
+  RewriteRule ^(data|vendor|\.git|\.github)(/|$) - [R=404,L]
+  RewriteRule ^(?:\.|composer(\.json|\.lock|\.zip)|README\.md)$ - [R=404,L]
+  RewriteRule ^api/(core|lib|seed)\.php$ - [R=404,L]
 
   # ── 2. /index[.html] → same page handler (no external redirect: an explicit
   #       ./ substitution leaks the filesystem path on Windows/XAMPP subfolders) ──

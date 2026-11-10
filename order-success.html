@@ -49,6 +49,7 @@
     <ul class="success-items" id="successItems"></ul>
 
     <div class="success-actions">
+      <a class="btn btn-ghost" id="billBtn" href="#" hidden>View order bill →</a>
       <a class="btn btn-ink" id="trackBtn" href="dashboard.html">Track my order →</a>
       <a class="btn btn-ghost" href="store.html">Continue shopping</a>
     </div>
@@ -87,15 +88,29 @@
     $("#metaAddress").textContent = order.address || "—";
     $("#trackBtn").href = order.signedIn ? "dashboard.html" : "login.html?next=dashboard.html";
     $("#trackBtn").textContent = order.signedIn ? "Track my order →" : "Sign in to track orders →";
+    if (order.invoice_token) {
+      const billParams = new URLSearchParams({ id: String(order.id), token: order.invoice_token });
+      $("#billBtn").href = `invoice.html?${billParams.toString()}`;
+      $("#billBtn").hidden = false;
+    } else if (order.signedIn && order.id) {
+      $("#billBtn").href = `invoice.html?id=${encodeURIComponent(order.id)}`;
+      $("#billBtn").hidden = false;
+    }
     const items = Array.isArray(order.items) ? order.items : [];
     $("#successItems").innerHTML = items.map(i => `<li><span>${esc(i.qty)} × ${esc(i.name)}</span><span>${i.price ? fmt(i.price * i.qty) : ""}</span></li>`).join("");
-    if (order.coupon) $("#successSub").textContent = `Coupon ${order.coupon} applied. We’ve reserved your items — a GST invoice ships with your parcel.`;
+    if (order.coupon) $("#successSub").textContent = `Coupon ${order.coupon} applied. We’ve reserved your items — your order bill is available from your account.`;
   } else {
     // deep-linked without stash (e.g. refreshed page) — show the essentials from the URL
     $("#orderId").textContent = qid ? "#" + qid : "";
     $(".success-title").innerHTML = `Order received. <span class="success-id">${qid ? "#" + esc(qid) : ""}</span>`;
     $("#successSub").textContent = "Your order is saved with the store. Track delivery status from your account, or reach out on WhatsApp.";
     $("#metaTotal").textContent = "—"; $("#metaPayment").textContent = "—"; $("#metaDelivery").textContent = "—"; $("#metaAddress").textContent = "—";
+    const token = params.get("token");
+    if (qid && token && /^[a-f0-9]{64}$/.test(token)) {
+      const billParams = new URLSearchParams({ id: qid, token });
+      $("#billBtn").href = `invoice.html?${billParams.toString()}`;
+      $("#billBtn").hidden = false;
+    }
   }
   try { sessionStorage.removeItem("dd_last_order"); } catch {}
 })();
