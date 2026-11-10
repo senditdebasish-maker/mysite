@@ -109,6 +109,47 @@ CSV exports; cancelled orders are excluded from sales and payment totals.
 Checkout re-reads and locks product rows in a transaction before it confirms an order,
 so simultaneous checkouts cannot sell the same remaining stock.
 
+## ERP features (orders · GST · inventory)
+
+Milestone 1 turns the store admin into an order-operations console:
+
+- **Order notes & history** — every status change is recorded in an order timeline
+  (`order_events` table). Admins can add notes from the Orders pane (per-order
+  **Notes**) marked *admin only* or *visible to customer*. Customers see status
+  updates and customer-visible notes under **My orders → Order updates**.
+- **Refunds** — per-order **Refund** action (reason required) puts the items back
+  into stock, releases the coupon slot and marks the order **refunded**, the same
+  exactly-once semantics as cancelling. Refunded/cancelled orders are final.
+- **GST tax invoices** — set **Seller GSTIN + seller state + GST rate** under
+  **Storefront → GST tax invoice & emails**. When both are set, bills print as GST
+  tax invoices (`INV-YYYY-NNNN`, assigned on first print and stored) with a CGST/SGST
+  (intra-state) or IGST (inter-state) breakup. Prices are treated as GST-inclusive
+  (MRP-style). Place of supply comes from the state captured at checkout (new
+  addresses require it); old orders without a state show a combined GST line.
+- **Lifecycle emails** — new-order notification to the store inbox and customer
+  updates on every status change / refund (uses the Gmail SMTP from setup; toggle in
+  the same panel). Mail failures are logged and never block checkout.
+- **Low-stock alert** — configurable threshold (Storefront → Store settings) drives
+  the low-stock badges, counts and reports everywhere.
+- **GST report** — Reports pane shows taxable value, CGST, SGST, IGST and total GST
+  for the selected range (cancelled/refunded excluded) with a per-invoice CSV export
+  (`api/admin/gst-report.csv`). Sales/orders CSVs gained State/PIN/Refund-reason
+  columns; products.csv gained SKU.
+- **Product SKU** — optional, unique, printed on bills and searchable in the admin.
+- **Coupons v2** — types: % off, ₹ off cart, ₹ off per item, plus max-uses,
+  per-customer caps (signed-in shoppers), expiry date, and optional product/category
+  scoping. Legacy `flat` coupons are migrated to `₹ off cart` automatically.
+
+Schema changes ship as idempotent migrations in `api/lib.php` (new `order_events`
+and `invoice_sequences` tables; new `orders` columns `state`, `pincode`,
+`guest_email`, `invoice_no`, `refund_reason`, `refunded_at`; new `products.sku`;
+new coupon columns `expires_at`, `usage_per_customer`, `product_ids`,
+`category_ids`). They run automatically on first API hit of an existing database.
+
+> GST figures are computed for guidance and MRP-style inclusive pricing; they are
+> not a substitute for your CA's sign-off or for e-invoicing (IRP) if you cross the
+> turnover threshold.
+
 ## Database backups
 
 Use phpMyAdmin to export the database before making changes and to import a backup:
@@ -144,6 +185,7 @@ composer audit
 | `setup.html` | MySQL, Gmail SMTP, admin, identity, and storefront setup |
 | `login.html` | Email OTP sign-in; account registration |
 | `api/index.php` | PHP JSON API, authentication, setup, checkout, admin routes |
+| `api/erp.php` | ERP module: order events/notes, refund flow, GST breakup & invoice numbering, lifecycle emails |
 | `api/lib.php` | MySQL connection, schema, and migrations |
 | `api/core.php` | Sessions, settings, password hashing, and shared helpers |
 | `api/seed.php` | Optional sample product catalogue and storefront defaults |
