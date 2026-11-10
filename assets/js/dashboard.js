@@ -31,7 +31,7 @@
 
   /* ═══════════ ORDERS ═══════════ */
   function progressHTML(status) {
-    if (status === "cancelled") {
+    if (status === "cancelled" || status === "refunded") {
       return `<div class="progress" aria-hidden="true">${"<span class='prog-seg cancel'></span>".repeat(4)}</div>`;
     }
     const idx = STATUS_STEPS.indexOf(status);
@@ -60,10 +60,12 @@
           <span class="order-total">${inr(o.total)}</span>
         </div>
         ${progressHTML(o.status)}
+        <div class="order-timeline" data-timeline="${o.id}" hidden></div>
         <div class="order-foot">
           <a class="order-help" href="${help}" target="_blank" rel="noopener">Issue with this order? Chat →</a>
           <a class="reorder-btn invoice-link" href="invoice.html?id=${o.id}">⬇ Bill</a>
           <button class="reorder-btn" data-reorder='${JSON.stringify((o.items || []).map(i => ({ id: i.id, qty: i.qty }))).replace(/'/g, "&apos;")}'>↺ Order again</button>
+          <button class="reorder-btn timeline-toggle" data-timeline-toggle="${o.id}" type="button" aria-expanded="false">Order updates</button>
           ${canCancel ? `<button class="cancel-order-btn" data-cancel-order="${o.id}" type="button">Cancel order</button>` : ""}
         </div>
       </article>`;
@@ -104,6 +106,34 @@
     }
     try { localStorage.setItem("dd_cart_v1", JSON.stringify(cart)); } catch {}
     location.href = "checkout.html";
+  });
+
+  // order updates timeline (customer-safe events only)
+  const timelineLabel = (e) => {
+    if (e.kind === "note") return esc(e.body || "");
+    if (e.toStatus) return `Order ${esc(statusLabel[e.fromStatus] || e.fromStatus || "created")} → ${esc(statusLabel[e.toStatus] || e.toStatus)}${e.body ? " — " + esc(e.body) : ""}`;
+    return esc(e.body || "Updated");
+  };
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-timeline-toggle]");
+    if (!btn) return;
+    const id = btn.getAttribute("data-timeline-toggle");
+    const panel = document.querySelector(`[data-timeline="${id}"]`);
+    if (!panel) return;
+    panel.hidden = !panel.hidden;
+    btn.setAttribute("aria-expanded", String(!panel.hidden));
+    if (panel.hidden || panel.dataset.loaded === "1") return;
+    panel.innerHTML = `<p class="muted" style="margin:.3rem 0; font-size:.75rem">Loading…</p>`;
+    try {
+      const data = await fetchJSON(`api/my/orders/${encodeURIComponent(id)}/events`);
+      const events = data.events || [];
+      panel.dataset.loaded = "1";
+      panel.innerHTML = events.length
+        ? `<ul class="timeline-list">${events.map(ev => `<li><span class="tl-dot" aria-hidden="true"></span><span class="tl-body">${timelineLabel(ev)}<br /><span class="muted" style="font-size:.68rem">${esc(dt(ev.createdAt))}</span></span></li>`).join("")}</ul>`
+        : `<p class="muted" style="margin:.3rem 0; font-size:.75rem">No updates yet — we’ll email you as the order moves.</p>`;
+    } catch (err) {
+      panel.innerHTML = `<p class="muted" style="margin:.3rem 0; font-size:.75rem">Couldn’t load updates: ${esc(err.message)}</p>`;
+    }
   });
 
   // cancel order

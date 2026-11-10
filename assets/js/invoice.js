@@ -44,7 +44,20 @@
       $("#invSellerContactDivider").hidden = !seller.email || !seller.phone;
       $("#invFooterSeller").textContent = seller.name || "Store";
 
-      document.title = `Order bill ${inv.invoiceNumber} — ${seller.name || "Store"}`;
+      const gst = inv.gst || null;
+      const taxInvoice = !!(gst && seller.gstin && seller.state);
+      $("#invTitle").textContent = taxInvoice ? "Tax invoice" : "Order bill";
+      $("#invToolbarTitle").textContent = taxInvoice ? "Tax invoice" : "Order bill";
+      $("#invNumberLabel").textContent = taxInvoice ? "Invoice" : "Bill";
+      $("#invTerms").textContent = taxInvoice
+        ? "This is a computer-generated tax invoice (GST-inclusive pricing) and is proof of supply; payment is due as shown above. For returns or billing help, contact the store quoting the invoice number."
+        : "This bill records the order total; it is not a GST tax invoice or proof of payment. Contact the store if you need help with this order.";
+      if (seller.gstin) {
+        $("#invSellerGstin").hidden = false;
+        $("#invSellerGstin").textContent = "GSTIN " + seller.gstin + (seller.state ? " · State: " + seller.state : "");
+      }
+
+      document.title = `${taxInvoice ? "Tax invoice" : "Order bill"} ${inv.invoiceNumber} — ${seller.name || "Store"}`;
       $("#invId").textContent = inv.invoiceNumber;
       $("#invOrderId").textContent = "#" + inv.id;
       $("#invDate").textContent = new Date(String(inv.createdAt).replace(" ", "T"))
@@ -62,7 +75,7 @@
       $("#invCoupon").textContent = inv.coupon ? `(${inv.coupon})` : "";
 
       $("#invItems").innerHTML = inv.items.map((it, i) => `
-        <tr><td>${i + 1}</td><td>${esc(it.name)}${it.category ? `<br /><small>${esc(it.category)}</small>` : ""}</td><td class="c">${it.qty}</td><td class="c">${inr(it.price)}</td><td>${inr(it.lineTotal)}</td></tr>`).join("");
+        <tr><td>${i + 1}</td><td>${esc(it.name)}${it.sku ? `<br /><small>SKU ${esc(it.sku)}</small>` : ""}${it.category ? `${it.sku ? " · " : "<br />"}<small>${esc(it.category)}</small>` : ""}</td><td class="c">${it.qty}</td><td class="c">${inr(it.price)}</td><td>${inr(it.lineTotal)}</td></tr>`).join("");
 
       $("#invSub").textContent = inr(inv.subtotal);
       if (inv.discount > 0) {
@@ -71,6 +84,41 @@
       }
       $("#invDelivery").textContent = inv.delivery === 0 ? "FREE" : inr(inv.delivery);
       $("#invTotal").textContent = inr(inv.total);
+
+      const gstBlock = $("#invGstBlock");
+      if (taxInvoice && gst) {
+        const pct = (bp) => {
+          const p = bp / 100;
+          return (Number.isInteger(p) ? String(p) : p.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")) + "%";
+        };
+        const intra = gst.intra === true, inter = gst.intra === false;
+        $("#invCgstRow").hidden = !intra;
+        $("#invSgstRow").hidden = !intra;
+        $("#invIgstRow").hidden = !inter;
+        $("#invUnknownRow").hidden = intra || inter;
+        if (intra) {
+          $("#invCgstRate").textContent = pct(gst.rateBp / 2);
+          $("#invSgstRate").textContent = pct(gst.rateBp / 2);
+          $("#invTaxableCgst").textContent = inr(gst.taxable);
+          $("#invTaxableSgst").textContent = inr(gst.taxable);
+          $("#invCgst").textContent = inr(gst.cgst);
+          $("#invSgst").textContent = inr(gst.sgst);
+        } else if (inter) {
+          $("#invIgstRate").textContent = pct(gst.rateBp);
+          $("#invTaxableIgst").textContent = inr(gst.taxable);
+          $("#invIgst").textContent = inr(gst.igst);
+        } else {
+          $("#invUnknownRate").textContent = pct(gst.rateBp);
+          $("#invTaxableUnknown").textContent = inr(gst.taxable);
+          $("#invUnknown").textContent = inr(gst.unattributed);
+        }
+        $("#invPlace").textContent = gst.placeOfSupply || "not recorded";
+        $("#invSellerState").textContent = gst.sellerState || "not configured";
+        $("#invGstTotal").textContent = Number(gst.totalTax || 0).toLocaleString("en-IN");
+        gstBlock.hidden = false;
+      } else {
+        gstBlock.hidden = true;
+      }
       $("#invWords").textContent = "Amount in words: INR " + numToWords(inv.total) + " only";
 
       $("#invoiceRoot").hidden = false;

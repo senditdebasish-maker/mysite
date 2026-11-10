@@ -123,6 +123,7 @@
         <button class="chip" data-filter="shipped">Shipped</button>
         <button class="chip" data-filter="delivered">Delivered</button>
         <button class="chip" data-filter="cancelled">Cancelled</button>
+        <button class="chip" data-filter="refunded">Refunded</button>
       </div>
       <div class="orders-toolbar">
         <input type="search" id="orderSearch" class="orders-search" placeholder="Search name, phone, order #, coupon…" aria-label="Search orders" />
@@ -238,6 +239,7 @@
               <label class="field">Delivery fee ₹<input id="sfFeeInput" type="number" min="0" step="1" /></label>
               <label class="field">Express fee ₹<input id="sfExpressFeeInput" type="number" min="0" max="1000" step="1" title="Flat fee for 1–2 day delivery, any order value" /></label>
               <label class="field">Max qty / line<input id="sfMaxQty" type="number" min="1" max="99" step="1" /></label>
+              <label class="field">Low-stock alert ≤<input id="sfLowStockInput" type="number" min="1" max="100" step="1" title="Products at or below this stock show as low everywhere" /></label>
             </div>
             <div class="sf-row">
               <label class="sf-check"><input type="checkbox" id="sfCodEnabled" checked /> Cash on Delivery enabled</label>
@@ -264,20 +266,49 @@
             <div class="panel-head"><h2 class="panel-title">Coupons</h2></div>
             <div class="tbl-wrap">
               <table class="tbl sf-coupons">
-                <thead><tr><th>Code</th><th>Type</th><th>Value</th><th>Min order</th><th>Used</th><th>Active</th><th></th></tr></thead>
+                <thead><tr><th>Code</th><th>Type</th><th>Value</th><th>Min order</th><th>Used</th><th>Expires</th><th>Active</th><th title="Restrict the coupon to these ids">Scope</th><th></th></tr></thead>
                 <tbody id="couponsBody"></tbody>
               </table>
             </div>
             <form class="sf-coupon-add" id="couponAddForm" autocomplete="off">
               <input id="cpCode" placeholder="CODE10" maxlength="20" required aria-label="Coupon code" />
-              <select id="cpType" aria-label="Coupon type"><option value="percent">% off</option><option value="flat">₹ off</option></select>
+              <select id="cpType" aria-label="Coupon type"><option value="percent">% off</option><option value="fixed_cart">₹ off cart</option><option value="fixed_product">₹ off per item</option></select>
               <input id="cpValue" type="number" min="1" step="1" required placeholder="10" aria-label="Value" />
               <input id="cpMinOrder" type="number" min="0" step="1" placeholder="Min ₹ (0)" aria-label="Minimum order" />
               <input id="cpMaxUses" type="number" min="0" step="1" placeholder="Max uses (0=∞)" aria-label="Max uses" />
+              <input id="cpPerCustomer" type="number" min="0" step="1" placeholder="Per customer (0=∞)" aria-label="Max uses per customer" />
+              <input id="cpExpires" type="date" aria-label="Expiry date (optional)" title="Expiry date (optional)" />
+              <input id="cpProductIds" placeholder="Product ids (optional)" aria-label="Restrict to product ids, comma-separated" title="Only these product ids count, comma-separated" />
+              <input id="cpCategoryIds" placeholder="Category ids (optional)" aria-label="Restrict to category ids, comma-separated" title="Only these category ids count, comma-separated" />
               <button type="submit" class="btn btn-ink btn-sm">Add</button>
             </form>
-            <p class="muted" style="font-size:.68rem; margin:.3rem 0 0">Percent 1–90 · codes A–Z 0–9 - _ · leave Max uses 0 for unlimited.</p>
+            <p class="muted" style="font-size:.68rem; margin:.3rem 0 0">Percent 1–90 · codes A–Z 0–9 - _ · 0 = unlimited · dates expire at end of day · scope limits what the discount applies to. Per-customer caps apply to signed-in shoppers.</p>
           </div>
+
+          <!-- GST & email notifications -->
+          <form class="panel sf-panel" id="erpConfigForm" style="margin-top:.8rem">
+            <div class="panel-head">
+              <h2 class="panel-title">GST tax invoice &amp; emails</h2>
+              <span class="muted" style="font-size:.7rem">INV-YYYY-NNNN on first print</span>
+            </div>
+            <label class="field sf-field-full">Seller GSTIN
+              <input id="erpGstin" maxlength="15" placeholder="19ABCDE1234F1Z5" style="text-transform:uppercase" autocomplete="off" spellcheck="false" />
+            </label>
+            <div class="sf-row">
+              <label class="field">Seller state
+                <select id="erpSellerState">
+                  <option value="">— choose state/UT —</option>
+                </select>
+              </label>
+              <label class="field">GST rate %<input id="erpGstRate" type="number" min="0" max="28" step="0.1" /></label>
+            </div>
+            <label class="sf-check"><input type="checkbox" id="erpEmailAdmin" checked /> Email me about every new order</label>
+            <label class="sf-check"><input type="checkbox" id="erpEmailCustomer" checked /> Email customers order updates (placed · confirmed · shipped · delivered · cancelled · refunded)</label>
+            <p class="muted" style="font-size:.68rem; margin:.2rem 0 0">Prices are treated as GST-inclusive (MRP-style). Bills print as GST tax invoices once GSTIN + seller state are set; place of supply comes from the checkout state field. Guests get order emails only if they share their email at checkout. Mail uses the Gmail SMTP from Setup and never blocks an order.</p>
+            <div class="sf-form-foot">
+              <button type="submit" class="btn btn-ink btn-sm" id="erpSave">Save GST &amp; emails</button>
+            </div>
+          </form>
         </div>
 
         <!-- inventory quick adjust -->
@@ -322,6 +353,21 @@
         <div class="stat-card"><span class="stat-label">Open / cancelled</span><span class="stat-num" id="rpPipeline">0 / 0</span><span class="stat-foot" id="rpCouponSaved">₹0 coupon savings</span></div>
       </div>
 
+      <div class="panel" style="margin-bottom:.85rem">
+        <div class="panel-head">
+          <h2 class="panel-title">GST summary · selected period</h2>
+          <a class="mini-btn" id="gstCsvLink" href="api/admin/gst-report.csv" download>⬇ GST invoices CSV</a>
+        </div>
+        <div class="stat-grid" style="margin:0">
+          <div class="stat-card"><span class="stat-label">Taxable value</span><span class="stat-num" id="rpGstTaxable">₹0</span></div>
+          <div class="stat-card"><span class="stat-label">CGST</span><span class="stat-num" id="rpGstCgst">₹0</span></div>
+          <div class="stat-card"><span class="stat-label">SGST</span><span class="stat-num" id="rpGstSgst">₹0</span></div>
+          <div class="stat-card"><span class="stat-label">IGST</span><span class="stat-num" id="rpGstIgst">₹0</span></div>
+          <div class="stat-card"><span class="stat-label">Total GST</span><span class="stat-num" id="rpGstTotal">₹0</span><span class="stat-foot" id="rpGstNote">intra 0 · inter 0 · unknown 0</span></div>
+        </div>
+        <p class="muted" style="font-size:.68rem; margin:.35rem .1rem 0">GST-inclusive (MRP-style) breakup of non-cancelled/refunded orders. “Unknown” = order had no state/PIN-matched place of supply — those invoices show a combined GST line. Refunded and cancelled orders are excluded.</p>
+      </div>
+
       <div class="orders-toolbar report-toolbar">
         <label class="orders-date">From <input type="date" id="rpFrom" /></label>
         <label class="orders-date">To <input type="date" id="rpTo" /></label>
@@ -337,7 +383,7 @@
           </div>
           <div class="rp-chart" id="rpChart" role="img" aria-label="Daily revenue bar chart"></div>
           <div class="rp-axis"><span id="rpChartStart">—</span><span id="rpChartEnd">—</span></div>
-          <p class="muted" style="font-size:.7rem; margin:.4rem 0 0">Hover a bar for the exact day. Cancelled orders are excluded.</p>
+          <p class="muted" style="font-size:.7rem; margin:.4rem 0 0">Hover a bar for the exact day. Cancelled and refunded orders are excluded.</p>
         </div>
         <div>
           <div class="panel" style="margin-bottom:.8rem">
@@ -390,6 +436,7 @@
       <label class="field">M.R.P. ₹ <span class="co-opt">(struck-out)</span><input id="pf-was" type="number" min="0" step="1" /></label>
       <label class="field">Stock<input id="pf-stock" type="number" min="0" max="2147483647" step="1" required /></label>
       <label class="field">Rating<input id="pf-rating" type="number" min="0" max="5" step="0.1" /></label>
+      <label class="field">SKU <span class="co-opt">(optional)</span><input id="pf-sku" maxlength="64" placeholder="AURA-TKL-68-BLK" autocomplete="off" style="text-transform:uppercase" /></label>
       <label class="field full" style="flex-direction:row; align-items:center; gap:.5rem; text-transform:none; letter-spacing:0; font-size:.85rem">
         <input type="checkbox" id="pf-active" checked style="width:18px;height:18px" /> Visible in the live store
       </label>

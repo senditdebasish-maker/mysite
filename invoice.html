@@ -47,6 +47,13 @@
   .inv-status{ display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; background:#fff3e0; color:#9a5b00; border:1px solid #f0d6a8 }
   .inv-status.delivered{ background:#edf7ef; color:#17753f; border-color:#cfe8d4 }
   .inv-status.cancelled{ background:#fbe9e4; color:#b02a1e; border-color:#f0c0b6 }
+  .inv-status.refunded{ background:#ffe4e6; color:#9f1239; border-color:#f3b6c0 }
+  .inv-gst{ margin:.35rem 0 0; border:1px solid #e7e2d2; border-radius:6px; background:#fbfaf6; padding:.4rem .55rem }
+  .inv-gst-tbl{ width:100%; border-collapse:collapse; font-size:.74rem }
+  .inv-gst-tbl th{ text-align:left; font-size:.56rem; letter-spacing:.16em; text-transform:uppercase; color:#8a8672; padding:.1rem .3rem .25rem; border-bottom:1px solid #e7e2d2 }
+  .inv-gst-tbl td{ padding:.22rem .3rem }
+  .inv-gst-tbl td:last-child, .inv-gst-tbl th:last-child{ text-align:right; font-variant-numeric:tabular-nums }
+  .inv-gst-note{ font-size:.62rem; color:#6f6b5c; margin:.3rem 0 0 }
   .inv-err{ text-align:center; padding:2.5rem 1rem }
   @media print {
     body{ background:#fff }
@@ -61,7 +68,7 @@
 <div class="inv-shell">
   <div class="inv-toolbar">
     <div>
-      <p class="inv-toolbar-title">Order bill</p>
+      <p class="inv-toolbar-title" id="invToolbarTitle">Order bill</p>
       <p class="muted" style="margin:0; font-size:.75rem">Print or save as PDF — use your browser’s print dialog.</p>
     </div>
     <div style="display:flex; gap:.5rem">
@@ -77,10 +84,11 @@
         <p class="inv-sub" id="invSellerLine" hidden></p>
         <p class="inv-sub" id="invSellerAddr" hidden></p>
         <p class="inv-contact" id="invSellerContact" hidden><span id="invSellerEmail"></span><span id="invSellerContactDivider"> · </span><span id="invSellerPhone"></span></p>
+        <p class="inv-contact" id="invSellerGstin" hidden></p>
       </div>
       <div class="inv-title-block">
-        <p class="inv-title">Order bill</p>
-        <p class="inv-meta">Bill <strong id="invId">—</strong><br />Order <strong id="invOrderId">#0</strong><br />Date: <strong id="invDate">—</strong><br />Status: <span class="inv-status" id="invStatus">pending</span></p>
+        <p class="inv-title" id="invTitle">Order bill</p>
+        <p class="inv-meta"><span id="invNumberLabel">Bill</span> <strong id="invId">—</strong><br />Order <strong id="invOrderId">#0</strong><br />Date: <strong id="invDate">—</strong><br />Status: <span class="inv-status" id="invStatus">pending</span></p>
       </div>
     </div>
 
@@ -111,9 +119,22 @@
         <tr class="inv-grand"><td>Total</td><td id="invTotal">₹0</td></tr>
       </table>
     </div>
+    <div class="inv-gst" id="invGstBlock" hidden>
+      <table class="inv-gst-tbl">
+        <thead><tr><th>Tax breakup</th><th>Rate</th><th>Taxable ₹</th><th>Tax ₹</th></tr></thead>
+        <tbody>
+          <tr id="invCgstRow"><td>CGST</td><td id="invCgstRate">—</td><td id="invTaxableCgst">₹0</td><td id="invCgst">₹0</td></tr>
+          <tr id="invSgstRow"><td>SGST</td><td id="invSgstRate">—</td><td id="invTaxableSgst">₹0</td><td id="invSgst">₹0</td></tr>
+          <tr id="invIgstRow" hidden><td>IGST</td><td id="invIgstRate">—</td><td id="invTaxableIgst">₹0</td><td id="invIgst">₹0</td></tr>
+          <tr id="invUnknownRow" hidden><td>GST</td><td id="invUnknownRate">—</td><td id="invTaxableUnknown">₹0</td><td id="invUnknown">₹0</td></tr>
+        </tbody>
+      </table>
+      <p class="inv-gst-note">Place of supply: <strong id="invPlace">—</strong> &nbsp;·&nbsp; Seller state: <span id="invSellerState">—</span><br />Prices are GST-inclusive (MRP-style). Total GST in this bill: <strong>₹<span id="invGstTotal">0</span></strong>.</p>
+    </div>
+
     <p class="inv-words" id="invWords">—</p>
 
-    <p class="inv-terms">This bill records the order total; it is not a GST tax invoice or proof of payment. Contact the store if you need help with this order.</p>
+    <p class="inv-terms" id="invTerms">This bill records the order total; it is not a GST tax invoice or proof of payment. Contact the store if you need help with this order.</p>
 
     <div class="inv-foot">
       <span id="invFooterSeller">Store</span>

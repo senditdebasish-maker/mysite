@@ -116,7 +116,7 @@
 
   /* ═══════════ address book ═══════════ */
   const addressComposite = (a) => [a.line, a.city, a.state, a.pincode].filter(Boolean).join(", ");
-  const addressIsValid = (a) => a.name && a.line.length >= 6 && /^\d{6}$/.test(a.pincode) && a.phone.replace(/\D/g, "").length >= 10;
+  const addressIsValid = (a) => a.name && a.line.length >= 6 && /^\d{6}$/.test(a.pincode) && a.phone.replace(/\D/g, "").length >= 10 && !!(a.state && a.state.trim());
 
   function renderAddressChoices() {
     const list = $1("#addrList");
@@ -165,6 +165,7 @@
 
     // session?
     try { me = (await fetchJSON("api/me")).user || null; } catch { me = null; }
+    $1("#guestEmailWrap").hidden = !!me;
     if (me) {
       $1("#whoamiBar").hidden = false;
       $1("#whoamiName").textContent = me.name;
@@ -240,7 +241,7 @@
       const err = $1("#addrError");
       err.hidden = true;
       if (!addressIsValid(a)) {
-        err.textContent = "Add a complete address — at least 6 characters for the street line, a 10-digit phone and a 6-digit PIN code.";
+        err.textContent = "Add a complete address — at least 6 characters for the street line, a 10-digit phone, a 6-digit PIN code and the state (needed for the GST bill).";
         err.hidden = false;
         $1("#naLine").focus();
         return;
@@ -256,8 +257,13 @@
     if (pay === "cod" && codMin > 0 && t.sub < codMin) { toast(`COD works on orders of ${fmtINR(codMin)} and above — use UPI on delivery instead`); return; }
     if (cfgNow.storeLive === false) { toast("The store is restocking right now — checkout is temporarily unavailable"); return; }
 
+    const chosen = usingSaved ? savedAddresses.find(x => x.id === selectedAddressId) : null;
+    const newAddr = chosen ? null : collectNewAddress();
     const fields = {
       customer_name: name, phone, address,
+      state: chosen ? (chosen.state || "") : (newAddr ? newAddr.state : ""),
+      pincode: chosen ? (chosen.pincode || "") : (newAddr ? newAddr.pincode : ""),
+      guest_email: me ? undefined : ($1("#coEmail")?.value.trim() || undefined),
       items: DD.cart.lines().map(l => ({ id: l.id, qty: l.qty })),
       coupon: (DD.coupon() && t.discount > 0) ? DD.coupon().code : undefined,
       payment: pay,

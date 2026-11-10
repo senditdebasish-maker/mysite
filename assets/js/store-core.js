@@ -154,8 +154,8 @@ window.DD = (function () {
     if (sub === 0) { note("Add something to the cart first", "error"); return null; }
     const OFFLINE_COUPONS = [
       { code: "WELCOME10", type: "percent", value: 10, min_order: 0 },
-      { code: "FLAT100",   type: "flat",    value: 100, min_order: 999 },
-      { code: "SHELF150",  type: "flat",    value: 150, min_order: 1499 },
+      { code: "FLAT100",   type: "fixed_cart", value: 100, min_order: 999 },
+      { code: "SHELF150",  type: "fixed_cart", value: 150, min_order: 1499 },
     ];
     try {
       let data = null, res = null;
