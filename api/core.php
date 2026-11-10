@@ -26,6 +26,8 @@ function dd_seller_info(): array {
     'addr'  => dd_site_get('site_address'),
     'email' => dd_site_get('site_email'),
     'phone' => dd_site_get('site_phone'),
+    'gstin' => dd_site_get('site_gstin'),
+    'state' => dd_site_get('seller_state'),
   ];
 }
 
@@ -48,6 +50,7 @@ function dd_store_config(): array {
     'codMin'      => (int) dd_num_setting('cod_min', 0),
     'maxQty'      => (int) dd_num_setting('max_qty', 99),
     'storeLive'   => dd_get_setting('store_live') === '1',
+    'lowStockThreshold' => max(1, min(100, (int) dd_num_setting('low_stock_threshold', 5))),
     'featuredIds' => $featured,
   ];
 }
@@ -60,6 +63,7 @@ function dd_product_out(array $p): array {
     'name' => $p['name'], 'meta' => $p['meta'], 'tag' => $p['category_name'] ?? $p['tag'],
     'price' => (int) $p['price'], 'was' => (int) $p['was'], 'rating' => (float) $p['rating'],
     'stock' => (int) $p['stock'], 'img' => $p['img'],
+    'sku' => (string) ($p['sku'] ?? ''),
     'reviews' => (int) ($p['reviews'] ?? 0), 'active' => (bool) $p['active'],
     'created_at' => $p['created_at'] ?? null,
   ];

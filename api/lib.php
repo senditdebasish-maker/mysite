@@ -282,6 +282,55 @@ final class DdDb {
         AND REFERENCED_TABLE_NAME = 'categories'")->fetchAll();
     if (!$categoryForeignKeys) self::$pdo->exec('ALTER TABLE products ADD CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE RESTRICT');
 
+    /* ── ERP milestone 1: order trail, GST invoice, coupon v2, SKU, low-stock ── */
+    $orderCols2 = $columns('orders');
+    if (!in_array('guest_email', $orderCols2, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN guest_email VARCHAR(190) NULL AFTER note");
+    if (!in_array('state', $orderCols2, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN state VARCHAR(100) NOT NULL DEFAULT '' AFTER address");
+    if (!in_array('pincode', $orderCols2, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN pincode VARCHAR(20) NOT NULL DEFAULT '' AFTER state");
+    if (!in_array('invoice_no', $orderCols2, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN invoice_no VARCHAR(32) NULL AFTER id");
+    if (!in_array('refund_reason', $orderCols2, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN refund_reason VARCHAR(255) NULL AFTER delivery_method");
+    if (!in_array('refunded_at', $orderCols2, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN refunded_at DATETIME NULL AFTER refund_reason");
+    $invIdx = self::$pdo->query("SHOW INDEX FROM orders WHERE Key_name = 'uq_orders_invoice_no'")->fetchAll();
+    if (!$invIdx) self::$pdo->exec('ALTER TABLE orders ADD UNIQUE KEY uq_orders_invoice_no (invoice_no)');
+
+    $productCols2 = $columns('products');
+    if (!in_array('sku', $productCols2, true)) self::$pdo->exec("ALTER TABLE products ADD COLUMN sku VARCHAR(64) NULL AFTER id");
+    $skuIdx = self::$pdo->query("SHOW INDEX FROM products WHERE Key_name = 'uq_products_sku'")->fetchAll();
+    if (!$skuIdx) self::$pdo->exec('ALTER TABLE products ADD UNIQUE KEY uq_products_sku (sku)');
+
+    $couponCols2 = $columns('coupons');
+    if (!in_array('expires_at', $couponCols2, true)) self::$pdo->exec("ALTER TABLE coupons ADD COLUMN expires_at DATETIME NULL AFTER max_uses");
+    if (!in_array('usage_per_customer', $couponCols2, true)) self::$pdo->exec("ALTER TABLE coupons ADD COLUMN usage_per_customer BIGINT NOT NULL DEFAULT 0 AFTER expires_at");
+    if (!in_array('product_ids', $couponCols2, true)) self::$pdo->exec("ALTER TABLE coupons ADD COLUMN product_ids TEXT NULL AFTER usage_per_customer");
+    if (!in_array('category_ids', $couponCols2, true)) self::$pdo->exec("ALTER TABLE coupons ADD COLUMN category_ids TEXT NULL AFTER product_ids");
+    $legacyFlat = self::$pdo->query("SELECT COUNT(*) FROM coupons WHERE type IN ('flat','fixed')")->fetchColumn();
+    if ($legacyFlat) self::$pdo->exec("UPDATE coupons SET type = 'fixed_cart' WHERE type IN ('flat','fixed')");
+    $legacyPercent = self::$pdo->query("SELECT COUNT(*) FROM coupons WHERE type NOT IN ('percent','fixed_cart','fixed_product')")->fetchColumn();
+    if ($legacyPercent) self::$pdo->exec("UPDATE coupons SET type = 'fixed_cart' WHERE type NOT IN ('percent','fixed_cart','fixed_product')");
+
+    self::$pdo->exec("CREATE TABLE IF NOT EXISTS invoice_sequences (
+      year INT NOT NULL PRIMARY KEY,
+      next INT NOT NULL DEFAULT 1
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    self::$pdo->exec("CREATE TABLE IF NOT EXISTS order_events (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      order_id BIGINT UNSIGNED NOT NULL,
+      kind VARCHAR(8) NOT NULL DEFAULT 'status',
+      from_status VARCHAR(16) NULL,
+      to_status VARCHAR(16) NULL,
+      body VARCHAR(500) NULL,
+      visibility VARCHAR(10) NOT NULL DEFAULT 'admin',
+      created_by BIGINT UNSIGNED NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_order_events_order (order_id, id),
+      CONSTRAINT fk_order_events_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    // backfill a status event for existing orders so the trail starts somewhere honest
+    self::$pdo->exec("INSERT INTO order_events (order_id, kind, to_status, visibility, created_at)
+      SELECT o.id, 'status', o.status, 'customer', o.created_at FROM orders o
+      WHERE NOT EXISTS (SELECT 1 FROM order_events e WHERE e.order_id = o.id AND e.kind = 'status')");
+
     $defaults = [
       ['Tech', 'tech', 'Technology and electronics', 10],
       ['Home & Living', 'home-living', 'Home, decor, and everyday living', 20],

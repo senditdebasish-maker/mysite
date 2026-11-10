@@ -74,8 +74,8 @@ function dd_seed_database(bool $demo = true): void {
     if ($count === 0) {
       $idc = dd_db()->prepare("INSERT INTO coupons (code,type,value,min_order,max_uses) VALUES (?,?,?,?,?)");
       $idc->execute(['WELCOME10', 'percent', 10, 0, 0]);
-      $idc->execute(['FLAT100', 'flat', 100, 999, 0]);
-      $idc->execute(['SHELF150', 'flat', 150, 1499, 100]);
+      $idc->execute(['FLAT100', 'fixed_cart', 100, 999, 0]);
+      $idc->execute(['SHELF150', 'fixed_cart', 150, 1499, 100]);
       error_log('[seed] coupons: WELCOME10 · FLAT100 · SHELF150');
     }
 

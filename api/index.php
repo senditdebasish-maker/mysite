@@ -5,6 +5,7 @@
  */
 declare(strict_types=1);
 require_once __DIR__ . '/core.php';
+require_once __DIR__ . '/erp.php';
 
 function dd_env_int(string $k, int $fallback): int { $v = getenv($k); return ($v !== false && is_numeric($v)) ? (int) $v : $fallback; }
 function dd_ip(array $req): string { return (string) ($req['ip'] ?? 'unknown'); }
@@ -208,7 +209,11 @@ function dd_coupon_row(string $raw): ?array {
   return $row ?: null;
 }
 function dd_coupon_usable(?array $c): bool {
-  return $c !== null && (!$c['max_uses'] || (int) $c['used'] < (int) $c['max_uses']);
+  if ($c === null) return false;
+  if ($c['max_uses'] && (int) $c['used'] >= (int) $c['max_uses']) return false;
+  $exp = $c['expires_at'] ?? null;
+  if ($exp && strtotime((string) $exp) !== false && strtotime((string) $exp) < time()) return false;
+  return true;
 }
 function dd_compute_discount(?array $c, int $subtotal): int {
   if (!$c || $subtotal < (int) ($c['min_order'] ?? 0)) return 0;
@@ -265,6 +270,19 @@ function route_orders_post(array $req): array {
   $phone = trim((string) ($b['phone'] ?? ''));
   $address = trim((string) ($b['address'] ?? ''));
   $note = trim((string) ($b['note'] ?? ''));
+  $state = mb_substr(trim((string) ($b['state'] ?? '')), 0, 100);
+  $pincode = trim((string) ($b['pincode'] ?? ''));
+  if ($pincode !== '' && !preg_match('/^\d{6}$/', $pincode)) {
+    throw new DdHttpError(400, 'PIN code must be 6 digits');
+  }
+  $guestEmail = strtolower(trim((string) ($b['guest_email'] ?? '')));
+  if ($me) $guestEmail = ''; // signed-in users get order updates at their account email
+  if ($guestEmail !== '' && !dd_email_ok($guestEmail)) {
+    throw new DdHttpError(400, "That email doesn't look right");
+  }
+  if ($guestEmail !== '' && mb_strlen($guestEmail) > 190) {
+    throw new DdHttpError(400, 'Email must be 190 characters or fewer');
+  }
   if (mb_strlen($name) > 120 || mb_strlen($phone) > 32 || strlen($address) > 60000 || strlen($note) > 60000) {
     throw new DdHttpError(400, 'One or more order fields exceed their maximum length');
   }
@@ -300,6 +318,7 @@ function route_orders_post(array $req): array {
       'id' => $p['id'], 'category_id' => isset($p['category_id']) ? (int) $p['category_id'] : null,
       'category' => (string) ($p['category_name'] ?? $p['tag']), 'name' => $p['name'],
       'price' => (int) $p['price'], 'qty' => $qty,
+      'sku' => (string) ($p['sku'] ?? ''),
     ];
     $subtotal += (int) $p['price'] * $qty;
   }
@@ -309,9 +328,40 @@ function route_orders_post(array $req): array {
   if ($couponRaw !== '') {
     $c = dd_coupon_row($couponRaw);
     if (!$c) throw new DdHttpError(400, "That coupon code doesn't exist");
-    if (!dd_coupon_usable($c)) throw new DdHttpError(409, 'This coupon has been fully used');
+    if (!dd_coupon_usable($c)) throw new DdHttpError(409, "This coupon is expired or has been fully used");
     if ($subtotal < (int) $c['min_order']) throw new DdHttpError(400, "Spend at least ₹{$c['min_order']} to use {$c['code']}");
-    $discount = dd_compute_discount($c, $subtotal);
+    // per-customer cap (signed-in shoppers only — guests can't be identified reliably)
+    $perCustomer = (int) ($c['usage_per_customer'] ?? 0);
+    if ($perCustomer > 0 && $me) {
+      $usedStmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ? AND coupon_code = ? AND status NOT IN ('cancelled', 'refunded')");
+      $usedStmt->execute([(int) $me['id'], $c['code']]);
+      if ((int) $usedStmt->fetchColumn() >= $perCustomer) {
+        throw new DdHttpError(409, "You've already used {$c['code']} the maximum number of times");
+      }
+    }
+    // optional scope: only some products / categories count towards the discount
+    $scopeProducts = array_values(array_filter(array_map('trim', explode(',', (string) ($c['product_ids'] ?? '')))));
+    $scopeCategories = array_values(array_filter(array_map('intval', explode(',', (string) ($c['category_ids'] ?? '')))));
+    $scoped = count($scopeProducts) > 0 || count($scopeCategories) > 0;
+    $eligibleSubtotal = 0;
+    $eligibleQty = 0;
+    foreach ($picked as $it) {
+      $eligible = !$scoped
+        || in_array((string) $it['id'], $scopeProducts, true)
+        || (count($scopeCategories) > 0 && in_array((int) ($it['category_id'] ?? 0), $scopeCategories, true));
+      if ($eligible) { $eligibleSubtotal += $it['price'] * $it['qty']; $eligibleQty += (int) $it['qty']; }
+    }
+    if ($scoped && $eligibleQty === 0) {
+      throw new DdHttpError(400, "This coupon doesn't apply to the items in your cart");
+    }
+    $basis = $scoped ? $eligibleSubtotal : $subtotal;
+    if (($c['type'] ?? '') === 'percent') {
+      $discount = (int) round($basis * (int) $c['value'] / 100);
+    } elseif (($c['type'] ?? '') === 'fixed_product') {
+      $discount = min((int) $c['value'] * $eligibleQty, $basis);
+    } else { // fixed_cart
+      $discount = min((int) $c['value'], $basis);
+    }
     $couponCode = $c['code'];
   }
 
@@ -324,9 +374,9 @@ function route_orders_post(array $req): array {
   $delivery = $method === 'express' ? (int) $cfg['expressFee'] : ($subtotal >= $cfg['freeAt'] ? 0 : $cfg['deliveryFee']);
   $total = max(0, $subtotal - $discount + $delivery);
     $invoiceToken = $me ? null : bin2hex(random_bytes(32));
-    $ins = $db->prepare("INSERT INTO orders (user_id,customer_name,phone,address,note,items_json,total,payment,coupon_code,discount,delivery_method,status,invoice_token_hash)
-                         VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?)");
-    $ins->execute([$me ? (int) $me['id'] : null, $name, $phone, $address, $note,
+    $ins = $db->prepare("INSERT INTO orders (user_id,customer_name,phone,address,note,state,pincode,guest_email,items_json,total,payment,coupon_code,discount,delivery_method,status,invoice_token_hash)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)");
+    $ins->execute([$me ? (int) $me['id'] : null, $name, $phone, $address, $note, $state, $pincode, $guestEmail,
                    json_encode($picked, JSON_UNESCAPED_UNICODE), $total, $pay, $couponCode, $discount, $method,
                    $invoiceToken === null ? null : hash('sha256', $invoiceToken)]);
     $orderId = (int) $db->lastInsertId();
@@ -345,6 +395,7 @@ function route_orders_post(array $req): array {
     if ($db->inTransaction()) $db->rollBack();
     throw $e;
   }
+  dd_notify_new_order($orderId);
 
   return dd_json_out(['order' => [
     'id' => $orderId, 'total' => $total, 'subtotal' => $subtotal, 'discount' => $discount, 'delivery' => $delivery,
@@ -400,7 +451,7 @@ function route_admin_orders(array $req): array {
   dd_require_admin($req);
   $query = $req['query'] ?? [];
   $status = trim((string) ($query['status'] ?? 'all'));
-  if (!in_array($status, ['all', 'pending', 'confirmed', 'shipped', 'delivered', 'cancelled'], true)) {
+  if (!in_array($status, ['all', 'pending', 'confirmed', 'shipped', 'delivered', 'cancelled', 'refunded'], true)) {
     throw new DdHttpError(400, 'Invalid order status filter');
   }
   $from = trim((string) ($query['from'] ?? ''));
@@ -442,7 +493,7 @@ function route_admin_orders(array $req): array {
 }
 
 function route_admin_order_status(array $req, string $id): array {
-  dd_require_admin($req);
+  $admin = dd_require_admin($req);
   $b = dd_body_json($req);
   $status = (string) ($b['status'] ?? '');
   if (!in_array($status, ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'], true)) {
@@ -455,9 +506,11 @@ function route_admin_order_status(array $req, string $id): array {
     $stmt->execute([(int) $id]);
     $order = $stmt->fetch();
     if (!$order) throw new DdHttpError(404, 'Order not found');
-    if ($order['status'] === 'cancelled' && $status !== 'cancelled') {
-      throw new DdHttpError(409, 'Cancelled orders are final. Create a new order if the customer still wants to buy.');
+    if (in_array($order['status'], ['cancelled', 'refunded'], true) && $status !== $order['status']) {
+      throw new DdHttpError(409, 'This order is closed (cancelled or refunded) and cannot be reopened. Create a new order if the customer still wants to buy.');
     }
+    $fromStatus = (string) $order['status'];
+    $changed = false;
     if ($status === 'cancelled' && $order['status'] !== 'cancelled') {
       $db->prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?")->execute([$order['id']]);
       $increment = $db->prepare('UPDATE products SET stock = LEAST(2147483647, stock + ?) WHERE id = ?');
@@ -468,17 +521,38 @@ function route_admin_order_status(array $req, string $id): array {
       if (($order['coupon_code'] ?? '') !== '') {
         $db->prepare('UPDATE coupons SET used = GREATEST(0, used - 1) WHERE code = ?')->execute([$order['coupon_code']]);
       }
+      $changed = true;
     } elseif ($status !== $order['status']) {
       $db->prepare('UPDATE orders SET status = ? WHERE id = ?')->execute([$status, $order['id']]);
+      $changed = true;
+    }
+    if ($changed) {
+      dd_add_event((int) $order['id'], 'status', $fromStatus, $status, null, 'customer', (int) $admin['id']);
     }
     $db->commit();
   } catch (Throwable $e) {
     if ($db->inTransaction()) $db->rollBack();
     throw $e;
   }
+  if ($changed) dd_notify_status_change((int) $order['id'], $status);
   return dd_json_out(['ok' => true, 'status' => $status]);
 }
 
+function dd_clean_sku($raw, ?string $existing): string {
+  $sku = strtoupper(trim((string) ($raw ?? $existing ?? '')));
+  if ($sku === '') return '';
+  if (strlen($sku) > 64 || !preg_match('/^[A-Z0-9][A-Z0-9._\\-]{0,63}$/', $sku)) {
+    throw new DdHttpError(400, 'SKU must be 1–64 characters: A–Z, 0–9, dot, underscore, hyphen');
+  }
+  return $sku;
+}
+function dd_sku_available(string $sku, ?string $exceptId = null): bool {
+  if ($sku === '') return true;
+  $stmt = dd_db()->prepare('SELECT id FROM products WHERE sku = ?' . ($exceptId ? ' AND id <> ?' : ''));
+  $args = $exceptId ? [$sku, $exceptId] : [$sku];
+  $stmt->execute($args);
+  return !$stmt->fetch();
+}
 function dd_read_product_body(array $b, ?array $existing = null): array {
   $existing = $existing ?? [];
   $name = trim((string) ($b['name'] ?? ($existing['name'] ?? '')));
@@ -497,6 +571,7 @@ function dd_read_product_body(array $b, ?array $existing = null): array {
   $active = ($activeRaw === true || $activeRaw === 'true' || $activeRaw === 1 || $activeRaw === '1') ? 1 : 0;
   return [
     'category_id' => array_key_exists('category_id', $b) ? dd_clampi($b['category_id'], 1, PHP_INT_MAX, 0) : (int) ($existing['category_id'] ?? 0),
+    'sku' => dd_clean_sku($b['sku'] ?? null, $existing['sku'] ?? null),
     'name' => $name,
     'price' => dd_clampi($b['price'] ?? ($existing['price'] ?? 0), 0, PHP_INT_MAX, 0),
     'was'   => dd_clampi($b['was']   ?? ($existing['was']   ?? 0), 0, PHP_INT_MAX, 0),
@@ -609,9 +684,10 @@ function route_admin_products_post(array $req): array {
   $categoryRow = $category->fetch();
   if (!$categoryRow || !(int) $categoryRow['active']) throw new DdHttpError(400, 'Choose an active product category');
   $p['tag'] = $categoryRow['name'];
+  if (!dd_sku_available($p['sku'])) throw new DdHttpError(409, 'That SKU is already used by another product');
   $id = 'pr_' . base_convert((string) time(), 10, 36) . bin2hex(random_bytes(2));
-  dd_db()->prepare('INSERT INTO products (id,category_id,name,meta,tag,price,was,rating,stock,img,active) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-    ->execute([$id, $p['category_id'], $p['name'], $p['meta'], $p['tag'], $p['price'], $p['was'], $p['rating'], $p['stock'], $p['img'], $p['active']]);
+  dd_db()->prepare('INSERT INTO products (id,category_id,name,meta,tag,price,was,rating,stock,img,active,sku) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+    ->execute([$id, $p['category_id'], $p['name'], $p['meta'], $p['tag'], $p['price'], $p['was'], $p['rating'], $p['stock'], $p['img'], $p['active'], $p['sku'] === '' ? null : $p['sku']]);
   $stmt = dd_db()->prepare('SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.id = ?'); $stmt->execute([$id]);
   return dd_json_out(['product' => dd_product_out($stmt->fetch())], 201);
 }
@@ -627,8 +703,9 @@ function route_admin_products_put(array $req, string $id): array {
   $categoryRow = $category->fetch();
   if (!$categoryRow || (!(int) $categoryRow['active'] && $p['active'])) throw new DdHttpError(400, 'Choose an active category for visible products');
   $p['tag'] = $categoryRow['name'];
-  dd_db()->prepare('UPDATE products SET category_id=?,name=?,meta=?,tag=?,price=?,was=?,rating=?,stock=?,img=?,active=? WHERE id=?')
-    ->execute([$p['category_id'], $p['name'], $p['meta'], $p['tag'], $p['price'], $p['was'], $p['rating'], $p['stock'], $p['img'], $p['active'], $existing['id']]);
+  if (!dd_sku_available($p['sku'], (string) $existing['id'])) throw new DdHttpError(409, 'That SKU is already used by another product');
+  dd_db()->prepare('UPDATE products SET category_id=?,name=?,meta=?,tag=?,price=?,was=?,rating=?,stock=?,img=?,active=?,sku=? WHERE id=?')
+    ->execute([$p['category_id'], $p['name'], $p['meta'], $p['tag'], $p['price'], $p['was'], $p['rating'], $p['stock'], $p['img'], $p['active'], $p['sku'] === '' ? null : $p['sku'], $existing['id']]);
   $stmt = dd_db()->prepare('SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.id = ?');
   $stmt->execute([$existing['id']]);
   return dd_json_out(['product' => dd_product_out($stmt->fetch())]);
@@ -752,6 +829,7 @@ function dd_invoice_item_totals(array $items): array {
     $subtotal += $lineTotal;
     $itemsOut[] = [
       'id' => $item['id'] ?? null, 'name' => $item['name'] ?? '', 'category' => $item['category'] ?? '',
+      'sku' => (string) ($item['sku'] ?? ''),
       'price' => $price, 'qty' => $qty, 'lineTotal' => $lineTotal,
     ];
   }
@@ -776,18 +854,24 @@ function route_invoice(array $req, string $id): array {
   $itemsOut = $billLines['items'];
   $subtotal = $billLines['subtotal'];
   $discount = (int) ($o['discount'] ?? 0);
-  $delivery = max(0, (int) $o['total'] - $subtotal + $discount);
+  $total = (int) $o['total'];
+  $delivery = max(0, $total - $subtotal + $discount);
+  $seller = dd_seller_info();
+  $gst = dd_gst_breakup($total, (string) ($seller['state'] ?? ''), (string) ($o['state'] ?? ''));
+  // assigns + stores INV-YYYY-NNNN on first view/print; reuses it forever after
+  $invoiceNumber = dd_invoice_number((int) $o['id']) ?? ('INV-' . str_pad((string) $o['id'], 6, '0', STR_PAD_LEFT));
   return dd_json_out([
     'invoice' => [
-      'id' => (int) $o['id'], 'invoiceNumber' => 'INV-' . str_pad((string) $o['id'], 6, '0', STR_PAD_LEFT),
+      'id' => (int) $o['id'], 'invoiceNumber' => $invoiceNumber,
       'createdAt' => $o['created_at'], 'status' => $o['status'],
-      'customer' => ['name' => $o['customer_name'], 'phone' => $o['phone'], 'email' => $o['customer_email'] ?? '', 'address' => $o['address']],
+      'customer' => ['name' => $o['customer_name'], 'phone' => $o['phone'], 'email' => $o['customer_email'] ?? '', 'address' => $o['address'], 'state' => $o['state'] ?? '', 'pincode' => $o['pincode'] ?? ''],
       'items' => $itemsOut,
       'subtotal' => $subtotal, 'discount' => $discount, 'delivery' => $delivery,
-      'total' => (int) $o['total'],
+      'total' => $total,
       'payment' => $o['payment'] ?: 'cod', 'coupon' => $o['coupon_code'] ?: '',
+      'gst' => $gst,
     ],
-    'seller' => dd_seller_info(),
+    'seller' => $seller,
   ]);
 }
 
@@ -833,7 +917,7 @@ function dd_product_category_names(): array {
 
 function dd_build_admin_report(string $from, string $to, int $span): array {
   $db = dd_db();
-  $range = $db->prepare('SELECT id,items_json,total,payment,coupon_code,discount,status,created_at
+  $range = $db->prepare('SELECT id,items_json,total,payment,coupon_code,discount,status,created_at,state,invoice_no
     FROM orders WHERE created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)
     ORDER BY created_at,id');
   $range->execute([$from, $to]);
@@ -850,17 +934,25 @@ function dd_build_admin_report(string $from, string $to, int $span): array {
   $byCategory = [];
   $cod = 0; $upi = 0; $codRevenue = 0; $upiRevenue = 0;
   $couponOrders = 0; $couponSaved = 0; $units = 0; $grossSales = 0;
-  $cancelled = 0; $open = 0; $salesOrders = 0;
+  $cancelled = 0; $open = 0; $salesOrders = 0; $refunded = 0;
+  $sellerState = (string) dd_get_setting('seller_state');
+  $gst = ['taxable' => 0, 'cgst' => 0, 'sgst' => 0, 'igst' => 0, 'unattributed' => 0, 'totalTax' => 0,
+          'rateBp' => dd_gst_rate_bp(), 'intra' => 0, 'inter' => 0, 'unknown' => 0];
   foreach ($orders as $o) {
     $key = substr((string) $o['created_at'], 0, 10);
     if (($o['status'] ?? '') === 'cancelled') { $cancelled++; continue; }
+    if (($o['status'] ?? '') === 'refunded') { $refunded++; continue; }
     if (isset($days[$key])) {
       $days[$key]['orders']++;
       $days[$key]['revenue'] += (int) $o['total'];
     }
     $salesOrders++;
     $grossSales += (int) $o['total'];
-    if (!in_array($o['status'], ['delivered', 'cancelled'], true)) $open++;
+    if (!in_array($o['status'], ['delivered', 'cancelled', 'refunded'], true)) $open++;
+    $g = dd_gst_breakup((int) $o['total'], $sellerState, (string) ($o['state'] ?? ''));
+    $gst['taxable'] += $g['taxable']; $gst['cgst'] += $g['cgst']; $gst['sgst'] += $g['sgst'];
+    $gst['igst'] += $g['igst']; $gst['unattributed'] += $g['unattributed']; $gst['totalTax'] += $g['totalTax'];
+    if ($g['intra'] === true) $gst['intra']++; elseif ($g['intra'] === false) $gst['inter']++; else $gst['unknown']++;
     if (($o['payment'] ?? '') === 'upi') { $upi++; $upiRevenue += (int) $o['total']; }
     else { $cod++; $codRevenue += (int) $o['total']; }
     if (!empty($o['coupon_code'])) { $couponOrders++; $couponSaved += (int) ($o['discount'] ?? 0); }
@@ -891,6 +983,7 @@ function dd_build_admin_report(string $from, string $to, int $span): array {
     'categories' => array_values($byCategory), 'payment' => ['cod' => $cod, 'upi' => $upi, 'codRevenue' => $codRevenue, 'upiRevenue' => $upiRevenue],
     'coupons' => ['orders' => $couponOrders, 'saved' => $couponSaved], 'units' => $units,
     'grossSales' => $grossSales, 'itemSales' => $itemSales, 'orders' => $salesOrders, 'cancelled' => $cancelled, 'open' => $open,
+    'refunded' => $refunded, 'gst' => $gst,
     'aov' => $salesOrders ? (int) round($grossSales / $salesOrders) : 0, 'ordersAllTime' => (int) $allTime['orders'],
   ];
 }
@@ -903,13 +996,13 @@ function route_admin_report_csv(array $req): array {
   dd_require_admin($req);
   [$from, $to] = dd_report_period($req['query'] ?? []);
   $categoryNames = dd_product_category_names();
-  $stmt = dd_db()->prepare('SELECT id,created_at,customer_name,phone,items_json,total,payment,coupon_code,discount,status
+  $stmt = dd_db()->prepare('SELECT id,created_at,customer_name,phone,items_json,total,payment,coupon_code,discount,status,state
     FROM orders WHERE created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)
     ORDER BY created_at,id');
   $stmt->execute([$from, $to]);
   $rows = [];
   foreach ($stmt->fetchAll() as $order) {
-    if (($order['status'] ?? '') === 'cancelled') continue;
+    if (in_array($order['status'] ?? '', ['cancelled', 'refunded'], true)) continue;
     foreach (dd_parse_items($order['items_json'] ?? null) as $item) {
       if (!is_array($item)) continue;
       $qty = max(0, (int) ($item['qty'] ?? 0));
@@ -921,12 +1014,12 @@ function route_admin_report_csv(array $req): array {
         $order['id'], $order['created_at'], $order['customer_name'], $order['phone'],
         $item['id'] ?? '', $item['name'] ?? '', $category,
         $qty, $price, $qty * $price, (int) $order['total'], $order['payment'],
-        $order['coupon_code'], (int) $order['discount'], $order['status'],
+        $order['coupon_code'], (int) $order['discount'], $order['status'], $order['state'] ?? '',
       ];
     }
   }
   return dd_send_csv('sales-report-' . $from . '-to-' . $to . '.csv',
-    ['Order','Placed','Customer','Phone','Product ID','Product','Category','Units','Unit price','Line sales','Order total','Payment','Coupon','Discount','Status'], $rows);
+    ['Order','Placed','Customer','Phone','Product ID','Product','Category','Units','Unit price','Line sales','Order total','Payment','Coupon','Discount','Status','State'], $rows);
 }
 
 /* ════════════════ admin storefront config ════════════════ */
@@ -935,7 +1028,8 @@ function route_admin_store_config_get(array $req): array {
   $cfg = dd_store_config();
   $inv = dd_db()->query('SELECT COALESCE(SUM(price * stock),0) AS value, COALESCE(SUM(stock),0) AS units, COUNT(*) AS skus FROM products WHERE active = 1')->fetch();
   $out = (int) dd_db()->query('SELECT COUNT(*) AS n FROM products WHERE active = 1 AND stock = 0')->fetch()['n'];
-  $low = (int) dd_db()->query('SELECT COUNT(*) AS n FROM products WHERE active = 1 AND stock > 0 AND stock <= 5')->fetch()['n'];
+  $threshold = max(1, min(100, (int) dd_num_setting('low_stock_threshold', 5)));
+  $low = (int) dd_db()->query('SELECT COUNT(*) AS n FROM products WHERE active = 1 AND stock > 0 AND stock <= ' . $threshold)->fetch()['n'];
   return dd_json_out(array_merge($cfg, [
     'inventoryValue' => (int) $inv['value'], 'unitsInStock' => (int) $inv['units'],
     'activeSkus' => (int) $inv['skus'], 'outOfStock' => $out, 'lowStock' => $low,
@@ -956,6 +1050,7 @@ function route_admin_store_config_put(array $req): array {
   if (array_key_exists('codMin', $b))      dd_set_setting('cod_min',     (string) dd_clampi($b['codMin'], 0, 100000, 0));
   if (array_key_exists('maxQty', $b))      dd_set_setting('max_qty',     (string) dd_clampi($b['maxQty'], 1, 99, 99));
   if (array_key_exists('storeLive', $b))   dd_set_setting('store_live',  dd_boolish($b['storeLive']));
+  if (array_key_exists('lowStockThreshold', $b)) dd_set_setting('low_stock_threshold', (string) dd_clampi($b['lowStockThreshold'], 1, 100, 5));
   if (array_key_exists('featuredIds', $b)) {
     $ids = is_array($b['featuredIds']) ? array_slice(array_values(array_filter($b['featuredIds'], 'is_string')), 0, 8) : [];
     $valid = [];
@@ -977,17 +1072,56 @@ function route_admin_coupons_post(array $req): array {
   $b = dd_body_json($req);
   $code = strtoupper(trim((string) ($b['code'] ?? '')));
   if (!preg_match('/^[A-Z0-9_-]{3,20}$/', $code)) throw new DdHttpError(400, 'Code must be 3–20 characters: A–Z, 0–9, hyphen, underscore');
-  $type = (($b['type'] ?? '') === 'flat') ? 'flat' : 'percent';
+  $typeRaw = (string) ($b['type'] ?? 'percent');
+  $type = in_array($typeRaw, ['percent', 'fixed_cart', 'fixed_product'], true) ? $typeRaw : null;
+  if ($type === null) throw new DdHttpError(400, 'Unknown coupon type');
   $value = (int) round((float) ($b['value'] ?? 0));
   if ($type === 'percent' && ($value < 1 || $value > 90)) throw new DdHttpError(400, 'Percentage must be 1–90');
-  if ($type === 'flat' && $value < 1) throw new DdHttpError(400, 'Flat discount must be at least ₹1');
+  if ($type !== 'percent' && $value < 1) throw new DdHttpError(400, 'Discount must be at least ₹1');
   $minOrder = dd_clampi($b['min_order'] ?? 0, 0, PHP_INT_MAX, 0);
   $maxUses = dd_clampi($b['max_uses'] ?? 0, 0, PHP_INT_MAX, 0);
+  $perCustomer = dd_clampi($b['usage_per_customer'] ?? 0, 0, PHP_INT_MAX, 0);
+  [$expiresAt, $productIds, $categoryIds] = dd_coupon_extras($b);
   $stmt = dd_db()->prepare('SELECT 1 FROM coupons WHERE code = ?'); $stmt->execute([$code]);
   if ($stmt->fetch()) throw new DdHttpError(409, "Coupon $code already exists");
-  dd_db()->prepare('INSERT INTO coupons (code,type,value,min_order,max_uses) VALUES (?,?,?,?,?)')->execute([$code, $type, $value, $minOrder, $maxUses]);
+  dd_db()->prepare('INSERT INTO coupons (code,type,value,min_order,max_uses,expires_at,usage_per_customer,product_ids,category_ids) VALUES (?,?,?,?,?,?,?,?,?)')
+    ->execute([$code, $type, $value, $minOrder, $maxUses, $expiresAt, $perCustomer, $productIds, $categoryIds]);
   $stmt = dd_db()->prepare('SELECT * FROM coupons WHERE code = ?'); $stmt->execute([$code]);
   return dd_json_out(['coupon' => $stmt->fetch()], 201);
+}
+function dd_coupon_extras(array $b): array {
+  // expiry: YYYY-MM-DD (end of day) or empty = never
+  $expiresAt = null;
+  if (array_key_exists('expires_at', $b)) {
+    $raw = trim((string) $b['expires_at']);
+    if ($raw !== '') {
+      if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw) || !checkdate((int) substr($raw, 5, 2), (int) substr($raw, 8, 2), (int) substr($raw, 0, 4))) {
+        throw new DdHttpError(400, 'Expiry must be a valid date (YYYY-MM-DD)');
+      }
+      $expiresAt = $raw . ' 23:59:59';
+    }
+  }
+  // optional cart scope: comma-separated product ids / category ids
+  $cleanList = function ($raw, string $label) {
+    $raw = trim((string) $raw);
+    if ($raw === '') return null;
+    $parts = array_values(array_filter(array_map('trim', explode(',', $raw)), fn($s) => $s !== ''));
+    foreach ($parts as $tok) {
+      if (strlen($tok) > 64 || !preg_match('/^[A-Za-z0-9_-]+$/', $tok)) {
+        throw new DdHttpError(400, "$label must be comma-separated ids (letters, numbers, - and _)");
+      }
+    }
+    if (count($parts) > 200) throw new DdHttpError(400, "$label list is too long (max 200)");
+    return count($parts) ? implode(',', $parts) : null;
+  };
+  $productIds = $cleanList($b['product_ids'] ?? '', 'Product ids');
+  $categoryIds = $cleanList($b['category_ids'] ?? '', 'Category ids');
+  if ($categoryIds !== null) {
+    foreach (explode(',', $categoryIds) as $tok) {
+      if (!ctype_digit($tok)) throw new DdHttpError(400, 'Category ids must be numbers');
+    }
+  }
+  return [$expiresAt, $productIds, $categoryIds];
 }
 function route_admin_coupons_put(array $req, string $code): array {
   dd_require_admin($req);
@@ -997,6 +1131,14 @@ function route_admin_coupons_put(array $req, string $code): array {
   $b = dd_body_json($req);
   if (array_key_exists('active', $b)) {
     dd_db()->prepare('UPDATE coupons SET active = ? WHERE code = ?')->execute([dd_boolish($b['active']) === '1' ? 1 : 0, $code]);
+  }
+  if (array_key_exists('max_uses', $b)) dd_db()->prepare('UPDATE coupons SET max_uses = ? WHERE code = ?')->execute([dd_clampi($b['max_uses'], 0, PHP_INT_MAX, 0), $code]);
+  if (array_key_exists('usage_per_customer', $b)) dd_db()->prepare('UPDATE coupons SET usage_per_customer = ? WHERE code = ?')->execute([dd_clampi($b['usage_per_customer'], 0, PHP_INT_MAX, 0), $code]);
+  if (array_key_exists('expires_at', $b) || array_key_exists('product_ids', $b) || array_key_exists('category_ids', $b)) {
+    [$expiresAt, $productIds, $categoryIds] = dd_coupon_extras($b);
+    if (array_key_exists('expires_at', $b)) dd_db()->prepare('UPDATE coupons SET expires_at = ? WHERE code = ?')->execute([$expiresAt, $code]);
+    if (array_key_exists('product_ids', $b)) dd_db()->prepare('UPDATE coupons SET product_ids = ? WHERE code = ?')->execute([$productIds, $code]);
+    if (array_key_exists('category_ids', $b)) dd_db()->prepare('UPDATE coupons SET category_ids = ? WHERE code = ?')->execute([$categoryIds, $code]);
   }
   $stmt->execute([$code]);
   return dd_json_out(['coupon' => $stmt->fetch()]);
@@ -1316,6 +1458,7 @@ function route_my_order_cancel(array $req, string $id): array {
     if (($o['coupon_code'] ?? '') !== '') {
       $db->prepare('UPDATE coupons SET used = GREATEST(0, used - 1) WHERE code = ?')->execute([$o['coupon_code']]);
     }
+    dd_add_event((int) $o['id'], 'status', (string) $o['status'], 'cancelled', 'Cancelled by customer', 'customer', (int) $u['id']);
     $db->commit();
   } catch (Throwable $e) {
     if ($db->inTransaction()) $db->rollBack();
@@ -1326,7 +1469,7 @@ function route_my_order_cancel(array $req, string $id): array {
 
 /* ════════════════ public offers (checkout coupon chips) ════════════════ */
 function route_coupons_offers(array $req): array {
-  $stmt = dd_db()->prepare('SELECT code,type,value,min_order FROM coupons WHERE active = 1 AND (max_uses = 0 OR used < max_uses) ORDER BY value DESC, code');
+  $stmt = dd_db()->prepare('SELECT code,type,value,min_order FROM coupons WHERE active = 1 AND (max_uses = 0 OR used < max_uses) AND (expires_at IS NULL OR expires_at >= NOW()) ORDER BY value DESC, code');
   $stmt->execute();
   $rows = $stmt->fetchAll();
   return dd_json_out(['offers' => array_map(fn($c) => ['code' => $c['code'], 'type' => $c['type'], 'value' => (int) $c['value'], 'min_order' => (int) $c['min_order']], $rows)]);
@@ -1369,7 +1512,7 @@ function route_admin_orders_csv(array $req): array {
     }
     return true;
   });
-  $header = ['Order','Placed','Customer','Phone','Email','Items','Subtotal','Discount','Delivery','Total','Payment','Delivery method','Coupon','Status','Address','Note'];
+  $header = ['Order','Placed','Customer','Phone','Email','Items','Subtotal','Discount','Delivery','Total','Payment','Delivery method','Coupon','Status','Address','Note','State','PIN','Refund reason'];
   $out = [];
   foreach ($rows as $o) {
     $items = dd_parse_items($o['items_json'] ?? null);
@@ -1379,7 +1522,7 @@ function route_admin_orders_csv(array $req): array {
     $delivery = max(0, (int) $o['total'] - $sub + (int) ($o['discount'] ?? 0));
     $out[] = [$o['id'], $o['created_at'], $o['customer_name'], $o['phone'], $o['user_email'] ?? '', implode('; ', $itemStrs),
               $sub, (int) ($o['discount'] ?? 0), $delivery, (int) $o['total'], $o['payment'], $o['delivery_method'] ?? 'standard',
-              $o['coupon_code'] ?? '', $o['status'], $o['address'], $o['note']];
+              $o['coupon_code'] ?? '', $o['status'], $o['address'], $o['note'], $o['state'] ?? '', $o['pincode'] ?? '', $o['refund_reason'] ?? ''];
   }
   return dd_send_csv('orders.csv', $header, $out);
 }
@@ -1393,9 +1536,9 @@ function route_admin_products_csv(array $req): array {
   foreach ($rows as $pr) {
     $out[] = [$pr['id'], $pr['name'], $pr['meta'], $pr['category_id'], $pr['category_name'] ?? $pr['tag'],
       (int) $pr['price'], (int) $pr['was'], (float) $pr['rating'], (int) $pr['stock'], $pr['img'],
-      ((int) $pr['active']) ? 'yes' : 'no', (int) ($pr['reviews'] ?? 0)];
+      ((int) $pr['active']) ? 'yes' : 'no', (int) ($pr['reviews'] ?? 0), $pr['sku'] ?? ''];
   }
-  return dd_send_csv('products.csv', ['ID','Name','Details','Category ID','Category','Price','MRP','Rating','Stock','Image','Active','Reviews'], $out);
+  return dd_send_csv('products.csv', ['ID','Name','Details','Category ID','Category','Price','MRP','Rating','Stock','Image','Active','Reviews','SKU'], $out);
 }
 
 /* ════════════════ router ════════════════ */
@@ -1451,6 +1594,13 @@ function dd_handle(array $req): array {
     $route('GET',  '#^/admin/stats$#', fn ($req) => route_admin_stats($req));
     $route('GET',  '#^/admin/orders$#', fn ($req) => route_admin_orders($req));
     $route('PUT',  '#^/admin/orders/(\d+)/status$#', fn ($req, $id) => route_admin_order_status($req, $id));
+    $route('GET',  '#^/admin/orders/(\d+)/events$#', fn ($req, $id) => route_admin_order_events_get($req, $id));
+    $route('POST', '#^/admin/orders/(\d+)/events$#', fn ($req, $id) => route_admin_order_events_post($req, $id));
+    $route('POST', '#^/admin/orders/(\d+)/refund$#', fn ($req, $id) => route_admin_order_refund($req, $id));
+    $route('GET',  '#^/my/orders/(\d+)/events$#', fn ($req, $id) => route_my_order_events($req, $id));
+    $route('GET',  '#^/admin/erp-config$#', fn ($req) => route_admin_erp_config_get($req));
+    $route('PUT',  '#^/admin/erp-config$#', fn ($req) => route_admin_erp_config_put($req));
+    $route('GET',  '#^/admin/gst-report.csv$#', fn ($req) => route_admin_gst_report_csv($req));
     $route('GET',  '#^/admin/categories$#', fn ($req) => route_admin_categories_get($req));
     $route('POST', '#^/admin/categories$#', fn ($req) => route_admin_categories_post($req));
     $route('PUT',  '#^/admin/categories/(\d+)$#', fn ($req, $id) => route_admin_categories_put($req, $id));
