@@ -2,3 +2,4 @@
 *.jar
 data/*
 !data/.htaccess
+composer.zip

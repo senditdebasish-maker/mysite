@@ -9,6 +9,7 @@
   RewriteRule ^(data|vendor|\.git|\.github)(/|$) - [R=404,L]
   RewriteRule ^(?:\.|composer(\.json|\.lock|\.zip)|README\.md)$ - [R=404,L]
   RewriteRule ^api/(core|lib|seed)\.php$ - [R=404,L]
+  RewriteRule ^tests(/|$) - [R=404,L]
 
   # ── 2. /index[.html] → same page handler (no external redirect: an explicit
   #       ./ substitution leaks the filesystem path on Windows/XAMPP subfolders) ──
