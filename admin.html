@@ -110,6 +110,7 @@
           <div style="border-top:1px dashed var(--sand-deep); margin:.8rem 0 .6rem"></div>
           <h2 class="panel-title">Pending actions</h2>
           <p class="muted" style="font-size:.85rem; margin:.3rem 0 0"><strong id="pendingCount">0</strong> order(s) waiting for confirmation. Change their status in the Orders tab — the customer sees it instantly in their dashboard.</p>
+          <p class="muted" style="font-size:.85rem; margin:.35rem 0 0"><strong id="openRequestsCount">0</strong> open return/refund request(s). Approve or reject them from the order’s Notes panel — the customer is emailed either way.</p>
         </div>
       </div>
     </section>
@@ -121,6 +122,7 @@
         <button class="chip" data-filter="pending">Pending</button>
         <button class="chip" data-filter="confirmed">Confirmed</button>
         <button class="chip" data-filter="shipped">Shipped</button>
+        <button class="chip" data-filter="out_for_delivery">Out for delivery</button>
         <button class="chip" data-filter="delivered">Delivered</button>
         <button class="chip" data-filter="cancelled">Cancelled</button>
         <button class="chip" data-filter="refunded">Refunded</button>
@@ -146,6 +148,7 @@
           <select id="bulkStatus" class="status-select">
             <option value="confirmed">Confirmed</option>
             <option value="shipped">Shipped</option>
+            <option value="out_for_delivery">Out for delivery</option>
             <option value="delivered">Delivered</option>
             <option value="cancelled">Cancelled</option>
           </select>
@@ -303,10 +306,13 @@
               <label class="field">GST rate %<input id="erpGstRate" type="number" min="0" max="28" step="0.1" /></label>
             </div>
             <label class="sf-check"><input type="checkbox" id="erpEmailAdmin" checked /> Email me about every new order</label>
-            <label class="sf-check"><input type="checkbox" id="erpEmailCustomer" checked /> Email customers order updates (placed · confirmed · shipped · delivered · cancelled · refunded)</label>
-            <p class="muted" style="font-size:.68rem; margin:.2rem 0 0">Prices are treated as GST-inclusive (MRP-style). Bills print as GST tax invoices once GSTIN + seller state are set; place of supply comes from the checkout state field. Guests get order emails only if they share their email at checkout. Mail uses the Gmail SMTP from Setup and never blocks an order.</p>
+            <label class="sf-check"><input type="checkbox" id="erpEmailCustomer" checked /> Email customers order updates (placed · confirmed · shipped · out for delivery · delivered · cancelled · refunded)</label>
+            <label class="sf-check"><input type="checkbox" id="erpCartReminders" checked /> Email cart reminders for abandoned carts (via the scheduled job)</label>
+            <label class="sf-check"><input type="checkbox" id="erpWhatsappCustomer" /> WhatsApp customers order updates automatically</label>
+            <p class="muted" id="erpWhatsappNote" style="font-size:.66rem; margin:.1rem 0 0"></p>
+            <p class="muted" style="font-size:.68rem; margin:.2rem 0 0">Prices are treated as GST-inclusive (MRP-style). Bills print as GST tax invoices once GSTIN + seller state are set; place of supply comes from the checkout state field. Guests get order emails only if they share their email at checkout. Mail uses the Gmail SMTP from Setup and never blocks an order. SMS is not wired — it needs an SMS gateway provider (MSG91, Twilio…) and its API keys; WhatsApp works either through Meta’s Cloud API (server env vars) or the WA button next to each order, which opens WhatsApp with a prefilled status message — no keys needed.</p>
             <div class="sf-form-foot">
-              <button type="submit" class="btn btn-ink btn-sm" id="erpSave">Save GST &amp; emails</button>
+              <button type="submit" class="btn btn-ink btn-sm" id="erpSave">Save GST &amp; notifications</button>
             </div>
           </form>
         </div>

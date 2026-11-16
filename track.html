@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Track my order — debasish. store</title>
+<meta name="description" content="Guest order tracking — check your parcel status with your order number and checkout contact detail. Works for COD and UPI-on-delivery orders." />
+<meta name="robots" content="noindex, follow" />
+<meta name="referrer" content="no-referrer" />
+<meta name="theme-color" content="#141414" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23141414'/%3E%3Ctext x='26' y='45' font-family='Georgia,serif' font-weight='700' font-size='38' fill='%23FAF6EF' text-anchor='middle'%3Ed%3C/text%3E%3Ccircle cx='45' cy='43' r='5.5' fill='%23E8542F'/%3E%3C/svg%3E" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Inter:wght@400..800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/app.css" />
+<style>
+  .trk-shell{ max-width:620px; margin:0 auto; padding:clamp(1.2rem,4vw,2.4rem) clamp(.8rem,3vw,1.2rem) 3rem; }
+  .trk-back{ font-size:.8rem; text-decoration:none; color:var(--ink-soft, #555); }
+  .trk-card{ background:#fff; border:1px solid var(--line, #e7e2d2); border-radius:16px; padding:clamp(1.1rem,3.5vw,1.8rem); box-shadow:0 14px 44px rgba(20,20,20,.08); margin-top:.8rem; }
+  .trk-card h1{ font-family:var(--font-display); font-weight:900; font-size:clamp(1.6rem,4.6vw,2.1rem); letter-spacing:-.03em; margin:.1rem 0 .2rem }
+  .trk-card .trk-sub{ color:#666; font-size:.85rem; margin:0 0 1rem }
+  .trk-field{ display:block; margin:.7rem 0 }
+  .trk-field span{ display:block; font-size:.72rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#555; margin-bottom:.28rem }
+  .trk-field input{ width:100%; font:inherit; font-size:1rem; padding:.62rem .75rem; border:1.5px solid var(--line, #e7e2d2); border-radius:10px; background:#fff; box-sizing:border-box }
+  .trk-field input:focus{ outline:none; border-color:#141414; box-shadow:0 0 0 3px rgba(20,20,20,.08) }
+  .trk-error{ margin:.7rem 0 0; padding:.55rem .7rem; border-radius:8px; background:#fbe9e4; color:#b02a1e; font-size:.84rem; border:1px solid #f0c0b6 }
+  .trk-result{ margin-top:.9rem; border-top:1.5px solid #141414; padding-top:.9rem }
+  .trk-result-head{ display:flex; justify-content:space-between; align-items:baseline; gap:.8rem; flex-wrap:wrap }
+  .trk-result-head h2{ font-family:var(--font-display); font-size:1.25rem; margin:0; letter-spacing:-.02em }
+  .trk-meta{ font-size:.78rem; color:#666; margin:.4rem 0 0; line-height:1.7 }
+  .trk-track-box{ margin:.75rem 0 0; border:1px solid var(--line, #e7e2d2); border-radius:10px; padding:.55rem .7rem; font-size:.85rem; background:#fbfaf6; line-height:1.65 }
+  .trk-foot{ margin:.9rem 0 0; font-size:.78rem; color:#777 }
+  .trk-foot a{ color:inherit }
+  .trk-progress{ margin:.7rem 0 .1rem }
+  .trk-steps{ display:flex; justify-content:space-between; font-size:.58rem; letter-spacing:.05em; text-transform:uppercase; color:#999; margin-top:.3rem }
+</style>
+</head>
+<body>
+<div class="trk-shell">
+  <a class="trk-back" href="./">← debasish. store</a>
+
+  <div class="trk-card">
+    <h1>Track my order</h1>
+    <p class="trk-sub">No sign-in needed. Enter your <strong>order number</strong> and the <strong>phone number or email</strong> you used at checkout — that’s it.</p>
+
+    <form id="trackForm" novalidate>
+      <label class="trk-field" for="trkOrder">
+        <span>Order number</span>
+        <input id="trkOrder" name="order_id" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" required placeholder="e.g. 1042" />
+      </label>
+      <label class="trk-field" for="trkContact">
+        <span>Phone or email used at checkout</span>
+        <input id="trkContact" name="contact" type="text" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" required placeholder="+91 98765 43210  or  you@example.com" />
+      </label>
+      <button type="submit" class="btn btn-ink" id="trackSubmit" style="width:100%; margin-top:.4rem">Find my order →</button>
+      <p class="trk-error" id="trackError" role="alert" hidden></p>
+    </form>
+
+    <div class="trk-result" id="trackResult" hidden aria-live="polite">
+      <div class="trk-result-head">
+        <h2>Order <span id="trkResId">#—</span></h2>
+        <span class="status-pill" id="trkResPill">—</span>
+      </div>
+
+      <div class="trk-progress">
+        <div class="progress" aria-hidden="true" id="trkProgress"></div>
+        <div class="trk-steps"><span>Placed</span><span>Confirmed</span><span>Shipped</span><span>Out for delivery</span><span>Delivered</span></div>
+      </div>
+
+      <p class="trk-meta">
+        Placed on <strong id="trkResDate">—</strong><br />
+        <span id="trkResCount">0</span> item(s) · <strong id="trkResTotal">₹0</strong> · <span id="trkResMethod">Standard delivery</span>
+      </p>
+
+      <div class="trk-track-box" id="trkParcel" hidden>
+        <strong>Parcel details</strong><br />
+        <span id="trkParcelCourier"></span><span id="trkParcelTracking"></span><br />
+        <span id="trkParcelEta" hidden>Expected by <strong id="trkParcelEtaDate"></strong><br /></span>
+        <a id="trkParcelLink" href="#" target="_blank" rel="noopener" hidden>Track this parcel with the courier →</a>
+      </div>
+
+      <p class="trk-foot">Questions about this order? <a href="contact.html">Contact the store</a> or see <a href="policies.html">shipping &amp; returns</a>. Signed-in? <a href="dashboard.html">Open your account for full details →</a></p>
+    </div>
+  </div>
+</div>
+<script src="assets/js/ui.js" defer></script>
+<script src="assets/js/track.js" defer></script>
+</body>
+</html>

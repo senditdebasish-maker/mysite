@@ -331,6 +331,49 @@ final class DdDb {
       SELECT o.id, 'status', o.status, 'customer', o.created_at FROM orders o
       WHERE NOT EXISTS (SELECT 1 FROM order_events e WHERE e.order_id = o.id AND e.kind = 'status')");
 
+    /* ── ERP milestone 2: shipment tracking + customer return/refund requests ── */
+    $orderCols3 = $columns('orders');
+    if (!in_array('courier', $orderCols3, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN courier VARCHAR(80) NULL AFTER delivery_method");
+    if (!in_array('tracking_number', $orderCols3, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(80) NULL AFTER courier");
+    if (!in_array('tracking_url', $orderCols3, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN tracking_url VARCHAR(255) NULL AFTER tracking_number");
+    if (!in_array('expected_delivery', $orderCols3, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN expected_delivery DATE NULL AFTER tracking_url");
+    if (!in_array('shipped_at', $orderCols3, true)) self::$pdo->exec("ALTER TABLE orders ADD COLUMN shipped_at DATETIME NULL AFTER expected_delivery");
+
+    self::$pdo->exec("CREATE TABLE IF NOT EXISTS abandoned_carts (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      user_id BIGINT UNSIGNED NULL,
+      email VARCHAR(190) NULL,
+      phone VARCHAR(32) NOT NULL DEFAULT '',
+      token VARCHAR(64) NOT NULL,
+      items_json MEDIUMTEXT NOT NULL,
+      total BIGINT NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NULL ON UPDATE CURRENT_TIMESTAMP,
+      reminded_at DATETIME NULL,
+      recovered_order_id BIGINT UNSIGNED NULL,
+      UNIQUE KEY uq_abandoned_token (token),
+      KEY idx_abandoned_pending (reminded_at, recovered_order_id),
+      KEY idx_abandoned_user (user_id),
+      CONSTRAINT fk_abandoned_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    self::$pdo->exec("CREATE TABLE IF NOT EXISTS order_requests (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      order_id BIGINT UNSIGNED NOT NULL,
+      user_id BIGINT UNSIGNED NULL,
+      type VARCHAR(16) NOT NULL DEFAULT 'return',
+      reason VARCHAR(120) NOT NULL DEFAULT '',
+      details VARCHAR(1000) NOT NULL DEFAULT '',
+      status VARCHAR(16) NOT NULL DEFAULT 'open',
+      admin_note VARCHAR(500) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NULL,
+      KEY idx_order_requests_order (order_id, id),
+      KEY idx_order_requests_status (status),
+      CONSTRAINT fk_order_requests_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+      CONSTRAINT fk_order_requests_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
     $defaults = [
       ['Tech', 'tech', 'Technology and electronics', 10],
       ['Home & Living', 'home-living', 'Home, decor, and everyday living', 20],

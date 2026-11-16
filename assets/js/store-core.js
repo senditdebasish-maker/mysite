@@ -68,7 +68,81 @@ window.DD = (function () {
   let coupon = null;  // { code, type, value, min_order, discount }
   try { const c = JSON.parse(localStorage.getItem("dd_coupon_v1") || "null"); if (c && typeof c === "object" && c.code) coupon = c; } catch { coupon = null; }
   const saveCoupon = () => { try { coupon ? localStorage.setItem("dd_coupon_v1", JSON.stringify(coupon)) : localStorage.removeItem("dd_coupon_v1"); } catch {} };
-  const saveCart = () => { try { localStorage.setItem("dd_cart_v1", JSON.stringify(cart)); } catch {} };
+  const saveCart = () => { try { localStorage.setItem("dd_cart_v1", JSON.stringify(cart)); } catch {} queueAbandonSync(); };
+
+  /* ── abandoned-cart tracking (optional, privacy-light) ──
+     A random token in localStorage identifies the saved cart. The server only
+     stores anything when there is a way to reach the person — signed-in session,
+     or a guest email/phone left at checkout — and the cron sends at most one
+     reminder per cart. Emptying the cart deletes the snapshot entirely. */
+  const ABANDON_KEY = "dd_cart_token_v1";
+  const abandonContact = { email: "", phone: "" };
+  let suppressAbandonSync = false;
+  const newCartToken = () => {
+    try {
+      const bytes = new Uint8Array(16);
+      (window.crypto || {}).getRandomValues?.call(window.crypto, bytes);
+      if (bytes.some(b => b)) return [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
+    } catch {}
+    return (Date.now().toString(16) + Math.random().toString(16).slice(2) + "00000000000000000000000000000000").replace(/[^a-f0-9]/gi, "0").slice(0, 32).toLowerCase();
+  };
+  let cartToken = (() => {
+    try {
+      let tok = localStorage.getItem(ABANDON_KEY) || "";
+      if (!/^[a-f0-9]{32}$/.test(tok)) { tok = newCartToken(); localStorage.setItem(ABANDON_KEY, tok); }
+      return tok;
+    } catch { return newCartToken(); }
+  })();
+  let abandonTimer = null;
+  function syncAbandonNow() {
+    clearTimeout(abandonTimer);
+    try {
+      const payload = { token: cartToken, items: cart.map(i => ({ id: i.id, qty: i.qty })) };
+      if (abandonContact.email) payload.email = abandonContact.email;
+      if (abandonContact.phone) payload.phone = abandonContact.phone;
+      fetch("api/cart/abandon", {
+        method: "POST", credentials: "same-origin", keepalive: true,
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      }).catch(() => {});
+    } catch {}
+  }
+  function queueAbandonSync() {
+    if (suppressAbandonSync) return;
+    clearTimeout(abandonTimer);
+    abandonTimer = setTimeout(syncAbandonNow, 1500);
+  }
+  // flush on the way out — keepalive lets the POST survive page unload
+  try { window.addEventListener("pagehide", () => syncAbandonNow()); } catch {}
+  async function restoreSavedCart() {
+    let token = null;
+    try { token = new URLSearchParams(location.search).get("restore_cart"); } catch {}
+    if (!token) return;
+    const cleanUrl = () => {
+      try {
+        const u = new URL(location.href);
+        u.searchParams.delete("restore_cart");
+        history.replaceState(null, "", u.pathname + (u.search || "") + (u.hash || ""));
+      } catch {}
+    };
+    try {
+      const res = await fetch("api/cart/restore?t=" + encodeURIComponent(token), { credentials: "same-origin" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { toast((data && data.error) || "That saved cart is no longer available"); cleanUrl(); return; }
+      const restored = Array.isArray(data && data.items) ? data.items : [];
+      suppressAbandonSync = true;
+      cart = restored.slice(0, 50).map(i => ({ id: String(i.id), qty: Math.max(1, Number(i.qty) || 1) }));
+      saveCart();
+      suppressAbandonSync = false;
+      renderCart();
+      openCart();
+      toast("Welcome back — your saved cart is here 🛒");
+      cleanUrl();
+    } catch {
+      suppressAbandonSync = false;
+      toast("Couldn’t restore your saved cart — please try again");
+      cleanUrl();
+    }
+  }
 
   const cartLines = () => cart.map(i => { const p = findProduct(i.id); return p ? { ...p, qty: i.qty } : null; }).filter(Boolean);
   const cartCount = () => cart.reduce((s, i) => s + i.qty, 0);
@@ -258,6 +332,7 @@ window.DD = (function () {
       const eta = $("#etaDate"); if (eta) eta.textContent = ETA;
     } catch { /* offline defaults */ }
     await refreshProducts();
+    await restoreSavedCart();
     renderCart();
   })();
 
@@ -274,5 +349,14 @@ window.DD = (function () {
     wish,
     recentlyViewed,
     cart: { add: addToCart, open: openCart, close: closeCart, render: renderCart, count: cartCount, subtotal, lines: cartLines, clear() { cart = []; saveCart(); renderCart(); } },
+    abandon: {
+      token: () => cartToken,
+      setContact(c) {
+        const next = c || {};
+        abandonContact.email = String(next.email || "").trim();
+        abandonContact.phone = String(next.phone || "").trim();
+      },
+      sync() { queueAbandonSync(); },
+    },
   };
 })();

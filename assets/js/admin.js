@@ -103,6 +103,8 @@
     $("#stCustomers").textContent = stats.customers;
     $("#stInquiries").textContent = `${stats.inquiries} leads received`;
     $("#pendingCount").textContent = stats.pending;
+    const openReqEl = $("#openRequestsCount");
+    if (openReqEl) openReqEl.textContent = stats.openRequests ?? 0;
     $("#badgeOrders").textContent = stats.pending;
     $("#badgeProducts").textContent = stats.products;
     $("#badgeCustomers").textContent = stats.customers;
@@ -137,22 +139,27 @@
   /* ───────── orders ───────── */
   function orderRow(o) {
     const items = (o.items || []).map(i => `${esc(i.name)} ×${i.qty}`).join(", ");
-    const waText = encodeURIComponent(`Hi ${o.customer_name}! Regarding your order #${o.id} — `);
+    const waText = encodeURIComponent(`Hi ${o.customer_name}! Update on your order #${o.id}: ${statusLabel[o.status] || o.status}. `);
     const waPhone = String(o.phone || "").replace(/[^\d]/g, "");
     const waLink = waPhone.length >= 10 ? `https://wa.me/${waPhone}?text=${waText}` : null;
     const deliveryBadge = o.delivery_method === "express"
       ? '<span class="pay-chip" style="color:#7C3AED">Express</span>'
       : "";
+    const openReq = Number(o.open_requests) || 0;
+    const trackingChip = (o.courier || o.tracking_number)
+      ? `<br /><span class="pay-chip" style="color:var(--ink-soft)" title="${esc([o.courier, o.tracking_number && "#" + o.tracking_number, o.expected_delivery && "expected " + String(o.expected_delivery).slice(0, 10)].filter(Boolean).join(" · "))}">Track: ${esc(o.courier || "shipped")}${o.tracking_number ? " #" + esc(o.tracking_number) : ""}</span>`
+      : "";
     return `
-      <tr>
+      <tr data-main-row="${o.id}">
         <td class="bulk-cell"><input type="checkbox" class="bulk-row" data-bulk-id="${o.id}" aria-label="Select order #${o.id}" /></td>
-        <td><strong>#${o.id}</strong>${deliveryBadge ? "<br>" + deliveryBadge : ""}</td>
+        <td><strong>#${o.id}</strong>${deliveryBadge ? "<br>" + deliveryBadge : ""}${trackingChip}</td>
         <td>
           ${esc(o.customer_name)}
           <br /><span class="muted" style="font-size:.72rem">${esc(o.phone || "no phone")}${o.user_email ? " · " + esc(o.user_email) : " · guest"}</span>
           <br /><span class="pay-chip">${o.payment === "upi" ? "UPI on delivery" : "COD"}${o.coupon_code ? ` · ${esc(o.coupon_code)}` : ""}${o.discount ? ` (−${inr(o.discount)})` : ""}</span>
           ${o.address ? `<br /><span class="muted" style="font-size:.7rem">${esc(o.address)}</span>` : ""}
           ${o.note ? `<br /><span class="muted" style="font-size:.7rem">Note: ${esc(o.note)}</span>` : ""}
+          ${openReq > 0 ? `<br /><span class="pay-chip req-count-chip" data-req-count-chip="${o.id}" style="color:var(--orange-deep)">${openReq} open request${openReq > 1 ? "s" : ""}</span>` : ""}
         </td>
         <td class="items-cell" title="${esc(items)}">${esc(items.length > 90 ? items.slice(0, 90) + "…" : items)}</td>
         <td>${inr(o.total)}</td>
@@ -165,6 +172,7 @@
         <td class="muted">${esc(dt(o.created_at))}</td>
         <td>
           <a class="mini-btn" href="invoice.html?id=${encodeURIComponent(o.id)}" target="_blank" rel="noopener" title="Open order bill">Bill</a>
+          <a class="mini-btn" href="packing-slip.html?id=${encodeURIComponent(o.id)}" target="_blank" rel="noopener" title="Print packing slip (no prices)">Slip</a>
           ${waLink ? `<a class="mini-btn" href="${waLink}" target="_blank" rel="noopener" title="Message customer on WhatsApp">WA</a>` : ""}
           <button class="mini-btn" data-notes="${o.id}" type="button" title="Notes &amp; order history" aria-expanded="false">Notes</button>
           ${!["cancelled", "refunded", "pending"].includes(o.status) ? `<button class="mini-btn danger" data-refund="${o.id}" type="button" title="Refund: restock items and mark refunded">Refund</button>` : ""}
@@ -173,7 +181,18 @@
       <tr class="order-detail-row" data-detail-row="${o.id}" hidden>
         <td colspan="8">
           <div class="order-detail">
-            <div class="od-head"><strong>Order #${o.id}</strong><span class="muted" style="font-size:.7rem">Notes &amp; status history — the customer sees status changes and notes marked “visible to customer”.</span></div>
+            <div class="od-head"><strong>Order #${o.id}</strong><span class="muted" style="font-size:.7rem">Shipment · notes &amp; status history — the customer sees tracking, status changes and notes marked “visible to customer”.</span></div>
+            <form class="od-ship" data-ship-form="${o.id}">
+              <span class="od-mini-title">Shipment</span>
+              <div class="od-ship-grid">
+                <input name="courier" type="text" maxlength="80" placeholder="Courier — Delhivery, India Post…" value="${esc(o.courier || "")}" aria-label="Courier" autocomplete="off" />
+                <input name="tracking_number" type="text" maxlength="80" placeholder="Tracking number" value="${esc(o.tracking_number || "")}" aria-label="Tracking number" autocomplete="off" />
+                <input name="tracking_url" type="url" maxlength="255" placeholder="https:// tracking link (optional)" value="${esc(o.tracking_url || "")}" aria-label="Tracking link" autocomplete="off" />
+                <input name="expected_delivery" type="date" value="${esc(String(o.expected_delivery || "").slice(0, 10))}" aria-label="Expected delivery date" />
+                <button type="submit" class="btn btn-ink btn-sm">Save &amp; ship →</button>
+              </div>
+            </form>
+            <div class="od-requests" data-requests="${o.id}"></div>
             <ul class="od-timeline" data-timeline="${o.id}"><li class="muted">Loading…</li></ul>
             <form class="od-note-form" data-note-form="${o.id}">
               <input type="text" name="body" maxlength="500" required placeholder="Add a note — e.g. “Called, customer wants phone confirmation”…" aria-label="Note for order ${o.id}" />
@@ -255,11 +274,40 @@
     }
     return esc(ev.body || "Updated");
   };
+  const reqLabel = { return: "Return", refund: "Refund", exchange: "Exchange", other: "Issue" };
+  function renderRequests(orderId, requests) {
+    const box = $(`#ordersBody [data-requests="${orderId}"]`);
+    if (!box) return;
+    const list = Array.isArray(requests) ? requests : [];
+    const openCount = list.filter(r => r.status === "open").length;
+    const chip = document.querySelector(`#ordersBody [data-req-count-chip="${orderId}"]`);
+    if (chip) {
+      chip.textContent = openCount > 0 ? `${openCount} open request${openCount > 1 ? "s" : ""}` : "";
+      chip.style.display = openCount > 0 ? "" : "none";
+    }
+    if (!list.length) { box.innerHTML = ""; return; }
+    box.innerHTML = '<span class="od-mini-title">Customer requests</span>' + list.map(r => `
+      <div class="od-req">
+        <div class="od-req-head">
+          <span class="req-chip req-${esc(r.status)}">${esc(reqLabel[r.type] || r.type)} · ${esc(r.status)}</span>
+          <span class="muted" style="font-size:.68rem">${esc(dt(r.createdAt))}${r.customer ? " · " + esc(r.customer) : ""}</span>
+        </div>
+        <p class="od-req-body"><strong>${esc(r.reason)}</strong>${r.details ? `<br />${esc(r.details)}` : ""}${r.adminNote ? `<br /><span class="muted">Store note: ${esc(r.adminNote)}</span>` : ""}</p>
+        ${r.status === "open" ? `
+        <div class="od-req-actions">
+          <input type="text" data-req-note maxlength="500" placeholder="Note to the customer (optional)…" aria-label="Note to the customer" />
+          <button class="mini-btn ok" data-req-decide="approved" data-req-id="${r.id}" data-order="${orderId}" type="button">Approve</button>
+          <button class="mini-btn danger" data-req-decide="rejected" data-req-id="${r.id}" data-order="${orderId}" type="button">Reject</button>
+          <button class="mini-btn" data-req-decide="resolved" data-req-id="${r.id}" data-order="${orderId}" type="button">Resolve</button>
+        </div>` : ""}
+      </div>`).join("");
+  }
   async function renderTimeline(orderId) {
     const list = $(`#ordersBody [data-timeline="${orderId}"]`);
     if (!list) return;
     try {
       const data = await fetchJSON(`api/admin/orders/${orderId}/events`);
+      renderRequests(orderId, data.requests || []);
       const events = data.events || [];
       list.innerHTML = events.length
         ? events.map(ev => `<li class="${ev.kind === "note" ? "is-note" : ""}"><span class="tl-kind">${ev.kind === "note" ? (ev.visibility === "customer" ? "Note · customer" : "Note · admin") : "Status"}</span><span class="tl-body">${timelineText(ev)}<br /><span class="muted" style="font-size:.66rem">${esc(dt(ev.createdAt))}${ev.author ? " · " + esc(ev.author) : ""}</span></span></li>`).join("")
@@ -269,6 +317,29 @@
     }
   }
   $("#ordersBody").addEventListener("click", async (e) => {
+    const decideBtn = e.target.closest("[data-req-decide]");
+    if (decideBtn) {
+      const reqId = decideBtn.getAttribute("data-req-id");
+      const orderId = decideBtn.getAttribute("data-order");
+      const wrap = decideBtn.closest(".od-req-actions");
+      const note = (wrap && wrap.querySelector("[data-req-note]")?.value.trim()) || "";
+      decideBtn.disabled = true;
+      try {
+        const data = await fetchJSON(`api/admin/requests/${encodeURIComponent(reqId)}/decide`, {
+          method: "POST",
+          body: JSON.stringify({ status: decideBtn.getAttribute("data-req-decide"), admin_note: note }),
+        });
+        toast("Request updated — the customer is emailed");
+        renderRequests(orderId, data.requests || []);
+        const pending = $("#pendingCount");
+        const stat = await fetchJSON("api/admin/stats").catch(() => null);
+        if (stat) { if (pending) pending.textContent = stat.pending; const oc = $("#openRequestsCount"); if (oc) oc.textContent = stat.openRequests ?? 0; }
+      } catch (err) {
+        toast(err.message || "Couldn’t update the request");
+        decideBtn.disabled = false;
+      }
+      return;
+    }
     const notesBtn = e.target.closest("[data-notes]");
     if (notesBtn) {
       const id = notesBtn.dataset.notes;
@@ -300,6 +371,30 @@
     }
   });
   $("#ordersBody").addEventListener("submit", async (e) => {
+    const shipForm = e.target.closest("[data-ship-form]");
+    if (shipForm) {
+      e.preventDefault();
+      const id = shipForm.getAttribute("data-ship-form");
+      const btn = shipForm.querySelector('button[type="submit"]');
+      btn.disabled = true; btn.textContent = "Saving…";
+      const payload = Object.fromEntries(new FormData(shipForm).entries());
+      try {
+        const resp = await fetchJSON(`api/admin/orders/${encodeURIComponent(id)}/shipment`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        toast(resp.status === "shipped" ? `Order #${id} marked shipped — the customer is emailed` : "Tracking details saved");
+        const mainRow = document.querySelector(`#ordersBody tr[data-main-row="${id}"]`);
+        const statusSelect = mainRow ? mainRow.querySelector("[data-status-id]") : null;
+        if (statusSelect) statusSelect.value = resp.status;
+        btn.disabled = false; btn.textContent = "Save & ship →";
+        renderTimeline(id);
+      } catch (err) {
+        toast(err.message || "Couldn’t save shipment");
+        btn.disabled = false; btn.textContent = "Save & ship →";
+      }
+      return;
+    }
     const form = e.target.closest("[data-note-form]");
     if (!form) return;
     e.preventDefault();
@@ -766,6 +861,11 @@
     $("#erpGstRate").value = (erp.gstRate ?? 18);
     $("#erpEmailAdmin").checked = erp.emailAdminNewOrder !== false;
     $("#erpEmailCustomer").checked = erp.emailCustomerUpdates !== false;
+    $("#erpCartReminders").checked = erp.cartReminderEmails !== false;
+    $("#erpWhatsappCustomer").checked = erp.whatsappCustomerUpdates === true;
+    $("#erpWhatsappNote").textContent = erp.whatsappConfigured
+      ? "Server credentials found (DD_WHATSAPP_TOKEN / DD_WHATSAPP_PHONE_ID) — customers will get WhatsApp messages on confirmed · shipped · out for delivery · delivered · cancelled · refunded."
+      : "Not configured on the server — set DD_WHATSAPP_TOKEN and DD_WHATSAPP_PHONE_ID (Meta WhatsApp Cloud API). Until then nothing is sent automatically; use the WA button next to each order to message the customer directly — no keys needed.";
     syncLiveToggle();
 
     /* featured picks */
@@ -821,8 +921,10 @@
         gstRate: $("#erpGstRate").value,
         emailAdminNewOrder: $("#erpEmailAdmin").checked,
         emailCustomerUpdates: $("#erpEmailCustomer").checked,
+        cartReminderEmails: $("#erpCartReminders").checked,
+        whatsappCustomerUpdates: $("#erpWhatsappCustomer").checked,
       }) });
-      toast("GST & email settings saved");
+      toast("GST & notification settings saved");
     } catch (err) { toast(err.message); } finally { btn.disabled = false; }
   });
 

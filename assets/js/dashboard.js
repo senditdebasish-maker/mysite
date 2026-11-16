@@ -7,7 +7,7 @@
   const waDigits = "910000000000";   // TODO: keep in sync with SITE.whatsapp in assets/js/app.js
   $("#helpWa").href = `https://wa.me/${waDigits}?text=${encodeURIComponent("Hi Debasish! I need help with my order.")}`;
 
-  const STATUS_STEPS = ["pending", "confirmed", "shipped", "delivered"];
+  const STATUS_STEPS = ["pending", "confirmed", "shipped", "out_for_delivery", "delivered"];
 
   /* ═══════════ TABS ═══════════ */
   const tabs = [
@@ -32,7 +32,7 @@
   /* ═══════════ ORDERS ═══════════ */
   function progressHTML(status) {
     if (status === "cancelled" || status === "refunded") {
-      return `<div class="progress" aria-hidden="true">${"<span class='prog-seg cancel'></span>".repeat(4)}</div>`;
+      return `<div class="progress" aria-hidden="true">${"<span class='prog-seg cancel'></span>".repeat(STATUS_STEPS.length)}</div>`;
     }
     const idx = STATUS_STEPS.indexOf(status);
     return `<div class="progress" aria-hidden="true">${
@@ -48,6 +48,49 @@
       ? '<span class="delivery-badge express">Express</span>'
       : '<span class="delivery-badge">Standard</span>';
     const couponLine = o.coupon_code ? `<span class="muted" style="font-size:.74rem">Coupon ${esc(o.coupon_code)} · saved ${inr(o.discount || 0)}</span>` : "";
+    // shipment tracking (shown once the store ships the parcel)
+    const hasTrack = o.courier || o.tracking_number || o.expected_delivery;
+    const trackingHTML = hasTrack ? `
+        <div class="track-line" role="status">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="6" width="13" height="11" rx="1.5"/><path d="M14.5 10h4l2.5 3.5V17h-6.5"/><circle cx="5.5" cy="17.5" r="1.6"/><circle cx="17" cy="17.5" r="1.6"/></svg>
+          <span>${esc(o.courier || "Shipped")}${o.tracking_number ? ` · #<strong>${esc(o.tracking_number)}</strong>` : ""}${o.expected_delivery ? ` · expected by <strong>${esc(String(o.expected_delivery).slice(0, 10))}</strong>` : ""}${o.tracking_url ? ` · <a href="${esc(o.tracking_url)}" target="_blank" rel="noopener">Track parcel →</a>` : ""}</span>
+        </div>` : "";
+    // return / refund requests (delivered orders only)
+    const reqLabel = { return: "Return", refund: "Refund", exchange: "Exchange", other: "Issue" };
+    const requests = Array.isArray(o.requests) ? o.requests : [];
+    const hasOpenRequest = requests.some(r => r.status === "open");
+    const requestChips = requests.length
+      ? requests.map(r => `<span class="req-chip req-${esc(r.status)}" title="${esc(r.reason || "")}">${esc(reqLabel[r.type] || r.type)} · ${esc(r.status)}</span>`).join(" ")
+      : "";
+    const requestHTML = o.status === "delivered" ? `
+        <div class="req-box">
+          ${requestChips}
+          ${hasOpenRequest ? '<span class="muted" style="font-size:.72rem">We’ll email you as soon as it’s reviewed.</span>' : `<button class="reorder-btn" data-req-open="${o.id}" type="button">Return / refund</button>
+          <form class="req-form" data-req-form="${o.id}" hidden>
+            <div class="req-row">
+              <select name="type" aria-label="Request type">
+                <option value="return">Return item(s)</option>
+                <option value="refund">Refund only</option>
+                <option value="exchange">Exchange</option>
+                <option value="other">Other issue</option>
+              </select>
+              <select name="reason" required aria-label="Reason for request">
+                <option value="" disabled selected>Pick a reason…</option>
+                <option>Arrived damaged</option>
+                <option>Wrong item delivered</option>
+                <option>Missing item(s)</option>
+                <option>Quality not as expected</option>
+                <option>Changed my mind</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <textarea name="details" rows="2" maxlength="1000" placeholder="Details (optional) — which item, what happened…"></textarea>
+            <div class="req-actions">
+              <button type="button" class="mini-btn" data-req-cancel>Cancel</button>
+              <button type="submit" class="btn btn-ink btn-sm">Send request</button>
+            </div>
+          </form>`}
+        </div>` : "";
     return `
       <article class="order-card">
         <div class="order-top">
@@ -60,6 +103,8 @@
           <span class="order-total">${inr(o.total)}</span>
         </div>
         ${progressHTML(o.status)}
+        ${trackingHTML}
+        ${requestHTML}
         <div class="order-timeline" data-timeline="${o.id}" hidden></div>
         <div class="order-foot">
           <a class="order-help" href="${help}" target="_blank" rel="noopener">Issue with this order? Chat →</a>
@@ -106,6 +151,47 @@
     }
     try { localStorage.setItem("dd_cart_v1", JSON.stringify(cart)); } catch {}
     location.href = "checkout.html";
+  });
+
+  // return / refund request form
+  document.addEventListener("click", (e) => {
+    const open = e.target.closest("[data-req-open]");
+    if (open) {
+      const id = open.getAttribute("data-req-open");
+      const form = document.querySelector(`[data-req-form="${id}"]`);
+      if (form) { form.hidden = !form.hidden; if (!form.hidden) form.elements.reason.focus(); }
+      return;
+    }
+    const cancel = e.target.closest("[data-req-cancel]");
+    if (cancel) {
+      const form = cancel.closest("[data-req-form]");
+      if (form) form.hidden = true;
+    }
+  });
+  document.addEventListener("submit", async (e) => {
+    const form = e.target.closest("[data-req-form]");
+    if (!form) return;
+    e.preventDefault();
+    const id = Number(form.getAttribute("data-req-form"));
+    const reason = form.elements.reason.value;
+    if (!reason) { toast("Pick a reason first"); return; }
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true; submitBtn.textContent = "Sending…";
+    try {
+      await fetchJSON(`api/my/orders/${encodeURIComponent(id)}/requests`, {
+        method: "POST",
+        body: JSON.stringify({
+          type: form.elements.type.value,
+          reason,
+          details: form.elements.details.value.trim() || undefined,
+        }),
+      });
+      toast("Request received — we’ll review it and get back to you");
+      await loadOrders(false);
+    } catch (err) {
+      toast(err.message || "Couldn’t send the request — chat on WhatsApp instead");
+      submitBtn.disabled = false; submitBtn.textContent = "Send request";
+    }
   });
 
   // order updates timeline (customer-safe events only)

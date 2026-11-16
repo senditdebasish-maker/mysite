@@ -140,6 +140,83 @@ Milestone 1 turns the store admin into an order-operations console:
   per-customer caps (signed-in shoppers), expiry date, and optional product/category
   scoping. Legacy `flat` coupons are migrated to `₹ off cart` automatically.
 
+Milestone 2 completes the order-management loop — dispatch, tracking and after-sales:
+
+- **Shipment tracking** — from the order's **Notes** panel, set the courier, tracking
+  number, an optional https tracking link and an expected delivery date, then **Save &
+  ship**. If the order was pending/confirmed it flips to **shipped** (shipped email
+  with courier + tracking included, customer-visible timeline event); saving again on
+  an already-shipped order just updates the parcel details. Customers see the courier,
+  tracking number, expected date and a track link on their order card, and the
+  shipped/delivered emails carry the same details. `orders.csv` gained courier,
+  tracking, link, expected-delivery and shipped-at columns.
+- **Return / refund requests (RMA)** — delivered orders gain a **Return / refund**
+  action in the customer dashboard (return · refund · exchange · other, with reason
+  and details). Requests land in the order's Notes panel with a count badge in the
+  row and the admin overview ("open return/refund requests"). Approve, reject or
+  resolve with an optional note — the customer gets an email either way, and a
+  customer-visible timeline note is added. Requests are capped at 2 open per order
+  and require the order to be delivered. Refund itself still uses the one-click
+  **Refund** flow above (restock + coupon release).
+- **Order emails** — new-request notification goes to the store inbox (reuses the
+  "email me about new orders" toggle); decision emails use the customer-update
+  toggle. Mail failures never block a request or a decision.
+
+Schema changes for milestone 2: new `orders` columns `courier`, `tracking_number`,
+`tracking_url`, `expected_delivery`, `shipped_at`; new `order_requests` table
+(order FK cascade, status open/approved/rejected/resolved). They run automatically
+on first API hit of an existing database, like the rest.
+
+Milestone 3 adds guest self-service, warehouse slips, delivery status granularity,
+and notifications / cart recovery:
+
+- **Guest "track my order" (`track.html`)** — linked in the storefront footer
+  (with `noindex, follow`). Looks up an order via throttled `POST /api/track`
+  using the order number **and** the checkout phone number (last-10-digit match)
+  or email. Both unknown orders and contact mismatches return the same generic
+  404 to prevent order-ID enumeration; only status, 5-step progress, item count,
+  total, delivery method, and courier/tracking/EDD are returned (never address,
+  notes, or payment details).
+- **Warehouse packing slip (`packing-slip.html`)** — admin-only printable A4 slip
+  opened from the **Slip** button next to **Bill** in the Orders table
+  (`GET /api/admin/orders/{id}/packing-slip`). Lists seller info, ship-to address,
+  dispatch method/payment, courier/tracking/EDD, customer note, item names/SKUs/categories
+  and piece quantities with checkboxes — **no prices or GST totals**.
+- **`out_for_delivery` status** — added across status badges, admin filter chips,
+  single & bulk status selectors, customer & guest 5-step progress bars,
+  lifecycle email/WhatsApp templates, and prefilled `wa.me` messages.
+- **Notifications (WhatsApp & SMS honesty)** — Admin → Storefront → GST &
+  notifications includes toggles for **cart reminder emails** (on by default) and
+  **WhatsApp customer updates** (off by default). Automatic WhatsApp messages use
+  Meta's WhatsApp Cloud API when `DD_WHATSAPP_TOKEN` and `DD_WHATSAPP_PHONE_ID`
+  are set in the server environment (failures never block orders); without server
+  credentials the admin UI clearly reports it as unconfigured and the per-order
+  **WA** button remains the keyless `wa.me` deep link. **SMS is not wired** —
+  sending SMS requires integrating an SMS gateway (MSG91, Twilio, WATI, etc.)
+  and its API keys.
+- **Abandoned-cart recovery** — the storefront saves a 32-hex local token
+  (`dd_cart_token_v1`) and syncs non-empty carts (`POST /api/cart/abandon`) only
+  when a reachable contact exists (signed-in session, or guest email/phone from
+  checkout); emptying the cart deletes the snapshot, and placing an order sets
+  `recovered_order_id`. Clicking a reminder link (`store.html?restore_cart=<token>`)
+  calls `GET /api/cart/restore?t=<token>`, restores available items into the cart,
+  and cleans the URL.
+- **Scheduled cron job (`api/cron.php`)** — CLI-only (HTTP access blocked in
+  `.htaccess` and returns 403 outside `cli`):
+  ```bash
+  DD_SITE_URL=https://store.example.com php api/cron.php abandoned-carts [--dry-run]
+  ```
+  Honours `email_customer_updates` + `cart_reminder_emails`, requires
+  `DD_SITE_URL` (`https?://...`) and configured Gmail SMTP for non-dry runs
+  (exits `78` otherwise; `64` on bad usage; `70` on DB error), respects
+  `DD_CART_REMIND_HOURS` (default `4`) and `DD_CART_REMIND_BATCH` (default `25`),
+  sends at most one reminder per cart snapshot (re-armed if `items_json` changes),
+  and purges reminded/recovered snapshots older than 90 days.
+
+Schema changes for milestone 3: new `abandoned_carts` table (`token VARCHAR(64)`
+unique, `user_id` FK `ON DELETE SET NULL`, `items_json`, `reminded_at`,
+`recovered_order_id`). Runs automatically on first API hit.
+
 Schema changes ship as idempotent migrations in `api/lib.php` (new `order_events`
 and `invoice_sequences` tables; new `orders` columns `state`, `pincode`,
 `guest_email`, `invoice_no`, `refund_reason`, `refunded_at`; new `products.sku`;
@@ -184,8 +261,11 @@ composer audit
 | --- | --- |
 | `setup.html` | MySQL, Gmail SMTP, admin, identity, and storefront setup |
 | `login.html` | Email OTP sign-in; account registration |
+| `track.html` | Public guest order-tracking lookup (`noindex`, anti-enumeration) |
+| `packing-slip.html` | Admin-only printable A4 warehouse packing slip (no prices) |
 | `api/index.php` | PHP JSON API, authentication, setup, checkout, admin routes |
-| `api/erp.php` | ERP module: order events/notes, refund flow, GST breakup & invoice numbering, lifecycle emails |
+| `api/erp.php` | ERP module: order events/notes, refund flow, GST breakup & invoice numbering, lifecycle & cart emails, WhatsApp notifications, shipment tracking, return/refund requests, guest track & cart abandon/restore |
+| `api/cron.php` | CLI-only scheduled job (`abandoned-carts`) — blocked from HTTP |
 | `api/lib.php` | MySQL connection, schema, and migrations |
 | `api/core.php` | Sessions, settings, password hashing, and shared helpers |
 | `api/seed.php` | Optional sample product catalogue and storefront defaults |

@@ -20,10 +20,22 @@
     return data;
   };
 
+  /* abandoned-cart: keep the saved snapshot warm while they type, so the
+     one-reminder cron can bring them back if they never finish */
+  const abandonSyncFromFields = () => {
+    if (!DD.abandon) return; // setContact + sync; store-core debounces the POST
+    DD.abandon.setContact({ email: $1("#coEmail")?.value, phone: $1("#coPhone")?.value });
+    DD.abandon.sync();
+  };
+
   let cfg = {};
   let me = null;              // signed-in user (or null)
   let savedAddresses = [];    // address book (signed-in only)
   let selectedAddressId = null; // null → using the new-address form
+
+  document.addEventListener("input", (e) => {
+    if (e.target && (e.target.id === "coEmail" || e.target.id === "coPhone")) abandonSyncFromFields();
+  });
 
   const state = () => ({
     delivery_method: $1('input[name="delivery_method"]:checked')?.value === "express" ? "express" : "standard",
@@ -264,6 +276,7 @@
       state: chosen ? (chosen.state || "") : (newAddr ? newAddr.state : ""),
       pincode: chosen ? (chosen.pincode || "") : (newAddr ? newAddr.pincode : ""),
       guest_email: me ? undefined : ($1("#coEmail")?.value.trim() || undefined),
+      cart_token: (DD.abandon && DD.abandon.token()) || undefined,
       items: DD.cart.lines().map(l => ({ id: l.id, qty: l.qty })),
       coupon: (DD.coupon() && t.discount > 0) ? DD.coupon().code : undefined,
       payment: pay,

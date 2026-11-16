@@ -275,6 +275,8 @@ function route_orders_post(array $req): array {
   if ($pincode !== '' && !preg_match('/^\d{6}$/', $pincode)) {
     throw new DdHttpError(400, 'PIN code must be 6 digits');
   }
+  $cartToken = strtolower(trim((string) ($b['cart_token'] ?? '')));
+  if (!preg_match('/^[a-f0-9]{32,64}$/', $cartToken)) $cartToken = '';
   $guestEmail = strtolower(trim((string) ($b['guest_email'] ?? '')));
   if ($me) $guestEmail = ''; // signed-in users get order updates at their account email
   if ($guestEmail !== '' && !dd_email_ok($guestEmail)) {
@@ -395,6 +397,10 @@ function route_orders_post(array $req): array {
     if ($db->inTransaction()) $db->rollBack();
     throw $e;
   }
+  if ($cartToken !== '') {
+    // mark the saved cart as recovered so the reminder cron leaves it alone
+    try { dd_db()->prepare('UPDATE abandoned_carts SET recovered_order_id = ? WHERE token = ?')->execute([(int) $orderId, $cartToken]); } catch (Throwable $e) {}
+  }
   dd_notify_new_order($orderId);
 
   return dd_json_out(['order' => [
@@ -412,6 +418,18 @@ function route_my_orders(array $req): array {
   foreach ($rows as &$o) {
     $o['items'] = dd_parse_items($o['items_json'] ?? null);
     unset($o['invoice_token_hash']);
+  }
+  unset($o);
+  if ($rows) {
+    // attach the customer's return/refund requests so the dashboard can render them inline
+    $ids = array_map(fn ($o) => (int) $o['id'], $rows);
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    $rs = dd_db()->prepare("SELECT * FROM order_requests WHERE order_id IN ($in) ORDER BY id DESC");
+    $rs->execute($ids);
+    $byOrder = [];
+    foreach ($rs->fetchAll() as $r) { $byOrder[(int) $r['order_id']][] = dd_map_request($r); }
+    foreach ($rows as &$o) { $o['requests'] = $byOrder[(int) $o['id']] ?? []; }
+    unset($o);
   }
   return dd_json_out(['orders' => $rows]);
 }
@@ -443,15 +461,17 @@ function route_admin_stats(array $req): array {
   $products = (int) dd_db()->query('SELECT COUNT(*) AS n FROM products WHERE active = 1')->fetch()['n'];
   $lowStock = (int) dd_db()->query('SELECT COUNT(*) AS n FROM products WHERE active = 1 AND stock <= 5')->fetch()['n'];
   $inquiries = (int) dd_db()->query('SELECT COUNT(*) AS n FROM inquiries')->fetch()['n'];
+  $openRequests = (int) dd_db()->query("SELECT COUNT(*) AS n FROM order_requests WHERE status = 'open'")->fetch()['n'];
   return dd_json_out(['revenue' => $revenue, 'todayRev' => $todayRev, 'orders' => $orders, 'pending' => $pending,
-    'customers' => $customers, 'products' => $products, 'lowStock' => $lowStock, 'inquiries' => $inquiries]);
+    'customers' => $customers, 'products' => $products, 'lowStock' => $lowStock, 'inquiries' => $inquiries,
+    'openRequests' => $openRequests]);
 }
 
 function route_admin_orders(array $req): array {
   dd_require_admin($req);
   $query = $req['query'] ?? [];
   $status = trim((string) ($query['status'] ?? 'all'));
-  if (!in_array($status, ['all', 'pending', 'confirmed', 'shipped', 'delivered', 'cancelled', 'refunded'], true)) {
+  if (!in_array($status, ['all', 'pending', 'confirmed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'refunded'], true)) {
     throw new DdHttpError(400, 'Invalid order status filter');
   }
   $from = trim((string) ($query['from'] ?? ''));
@@ -480,7 +500,9 @@ function route_admin_orders(array $req): array {
   $count->execute($params);
   $total = (int) $count->fetchColumn();
   $offset = ($page - 1) * $pageSize;
-  $rowsStmt = dd_db()->prepare("SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id = o.user_id$whereSql
+  $rowsStmt = dd_db()->prepare("SELECT o.*, u.email AS user_email,
+                                  (SELECT COUNT(*) FROM order_requests r WHERE r.order_id = o.id AND r.status = 'open') AS open_requests
+                                FROM orders o LEFT JOIN users u ON u.id = o.user_id$whereSql
                                 ORDER BY o.created_at DESC, o.id DESC LIMIT $pageSize OFFSET $offset");
   $rowsStmt->execute($params);
   $rows = $rowsStmt->fetchAll();
@@ -496,7 +518,7 @@ function route_admin_order_status(array $req, string $id): array {
   $admin = dd_require_admin($req);
   $b = dd_body_json($req);
   $status = (string) ($b['status'] ?? '');
-  if (!in_array($status, ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'], true)) {
+  if (!in_array($status, ['pending', 'confirmed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'], true)) {
     throw new DdHttpError(400, 'Invalid status');
   }
   $db = dd_db();
@@ -870,6 +892,43 @@ function route_invoice(array $req, string $id): array {
       'total' => $total,
       'payment' => $o['payment'] ?: 'cod', 'coupon' => $o['coupon_code'] ?: '',
       'gst' => $gst,
+    ],
+    'seller' => $seller,
+  ]);
+}
+
+/**
+ * GET /admin/orders/{id}/packing-slip — warehouse print data. No prices, no GST;
+ * just what the packer needs: where it goes, what's inside, how many pieces.
+ */
+function route_admin_packing_slip(array $req, string $id): array {
+  dd_require_admin($req);
+  if (!ctype_digit($id)) throw new DdHttpError(404, 'Order not found');
+  $stmt = dd_db()->prepare('SELECT o.*, u.email AS customer_email FROM orders o LEFT JOIN users u ON u.id = o.user_id WHERE o.id = ?');
+  $stmt->execute([(int) $id]);
+  $o = $stmt->fetch();
+  if (!$o) throw new DdHttpError(404, 'Order not found');
+  $items = [];
+  $totalQty = 0;
+  foreach (dd_parse_items($o['items_json'] ?? null) as $it) {
+    if (!is_array($it)) continue;
+    $qty = max(1, (int) ($it['qty'] ?? 1));
+    $totalQty += $qty;
+    $items[] = ['name' => (string) ($it['name'] ?? 'Item'), 'sku' => (string) ($it['sku'] ?? ''),
+                'category' => (string) ($it['category'] ?? ''), 'qty' => $qty];
+  }
+  $seller = dd_seller_info();
+  return dd_json_out([
+    'slip' => [
+      'id' => (int) $o['id'], 'createdAt' => $o['created_at'], 'status' => $o['status'],
+      'deliveryMethod' => ($o['delivery_method'] ?? 'standard') === 'express' ? 'Express' : 'Standard',
+      'payment' => ($o['payment'] ?? 'cod') === 'upi' ? 'UPI on delivery' : 'Cash on delivery',
+      'courier' => (string) ($o['courier'] ?? ''), 'trackingNumber' => (string) ($o['tracking_number'] ?? ''),
+      'expectedDelivery' => (string) ($o['expected_delivery'] ?? ''),
+      'customer' => ['name' => $o['customer_name'], 'phone' => $o['phone'], 'address' => $o['address'],
+                     'state' => (string) ($o['state'] ?? ''), 'pincode' => (string) ($o['pincode'] ?? ''),
+                     'note' => (string) ($o['note'] ?? '')],
+      'items' => $items, 'totalQty' => $totalQty,
     ],
     'seller' => $seller,
   ]);
@@ -1512,7 +1571,7 @@ function route_admin_orders_csv(array $req): array {
     }
     return true;
   });
-  $header = ['Order','Placed','Customer','Phone','Email','Items','Subtotal','Discount','Delivery','Total','Payment','Delivery method','Coupon','Status','Address','Note','State','PIN','Refund reason'];
+  $header = ['Order','Placed','Customer','Phone','Email','Items','Subtotal','Discount','Delivery','Total','Payment','Delivery method','Coupon','Status','Address','Note','State','PIN','Refund reason','Courier','Tracking number','Tracking link','Expected delivery','Shipped at'];
   $out = [];
   foreach ($rows as $o) {
     $items = dd_parse_items($o['items_json'] ?? null);
@@ -1522,7 +1581,8 @@ function route_admin_orders_csv(array $req): array {
     $delivery = max(0, (int) $o['total'] - $sub + (int) ($o['discount'] ?? 0));
     $out[] = [$o['id'], $o['created_at'], $o['customer_name'], $o['phone'], $o['user_email'] ?? '', implode('; ', $itemStrs),
               $sub, (int) ($o['discount'] ?? 0), $delivery, (int) $o['total'], $o['payment'], $o['delivery_method'] ?? 'standard',
-              $o['coupon_code'] ?? '', $o['status'], $o['address'], $o['note'], $o['state'] ?? '', $o['pincode'] ?? '', $o['refund_reason'] ?? ''];
+              $o['coupon_code'] ?? '', $o['status'], $o['address'], $o['note'], $o['state'] ?? '', $o['pincode'] ?? '', $o['refund_reason'] ?? '',
+              $o['courier'] ?? '', $o['tracking_number'] ?? '', $o['tracking_url'] ?? '', $o['expected_delivery'] ?? '', $o['shipped_at'] ?? ''];
   }
   return dd_send_csv('orders.csv', $header, $out);
 }
@@ -1590,6 +1650,9 @@ function dd_handle(array $req): array {
     $route('DELETE', '#^/addresses/(\d+)$#', fn ($req, $id) => route_addresses_delete($req, $id));
     $route('POST', '#^/me/password$#', fn ($req) => route_me_password($req));
     $route('GET',  '#^/coupons/offers$#', fn ($req) => route_coupons_offers($req));
+    $route('POST', '#^/cart/abandon$#', fn ($req) => route_cart_abandon($req));
+    $route('GET',  '#^/cart/restore$#', fn ($req) => route_cart_restore($req));
+    $route('POST', '#^/track$#', fn ($req) => route_track_order($req));
     $route('POST', '#^/inquiries$#', fn ($req) => route_inquiries_post($req));
     $route('GET',  '#^/admin/stats$#', fn ($req) => route_admin_stats($req));
     $route('GET',  '#^/admin/orders$#', fn ($req) => route_admin_orders($req));
@@ -1597,6 +1660,10 @@ function dd_handle(array $req): array {
     $route('GET',  '#^/admin/orders/(\d+)/events$#', fn ($req, $id) => route_admin_order_events_get($req, $id));
     $route('POST', '#^/admin/orders/(\d+)/events$#', fn ($req, $id) => route_admin_order_events_post($req, $id));
     $route('POST', '#^/admin/orders/(\d+)/refund$#', fn ($req, $id) => route_admin_order_refund($req, $id));
+    $route('POST', '#^/admin/orders/(\d+)/shipment$#', fn ($req, $id) => route_admin_order_shipment($req, $id));
+    $route('GET',  '#^/admin/orders/(\d+)/packing-slip$#', fn ($req, $id) => route_admin_packing_slip($req, $id));
+    $route('POST', '#^/admin/requests/(\d+)/decide$#', fn ($req, $id) => route_admin_request_decide($req, $id));
+    $route('POST', '#^/my/orders/(\d+)/requests$#', fn ($req, $id) => route_my_order_requests_post($req, $id));
     $route('GET',  '#^/my/orders/(\d+)/events$#', fn ($req, $id) => route_my_order_events($req, $id));
     $route('GET',  '#^/admin/erp-config$#', fn ($req) => route_admin_erp_config_get($req));
     $route('PUT',  '#^/admin/erp-config$#', fn ($req) => route_admin_erp_config_put($req));

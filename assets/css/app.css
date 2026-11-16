@@ -32,6 +32,7 @@ body{ overflow:auto !important; height:auto !important; min-height:100dvh; }
 .st-pending{ color:#B45309; background:#FEF3C7; }
 .st-confirmed{ color:#1D4ED8; background:#DBEAFE; }
 .st-shipped{ color:#7C3AED; background:#EDE9FE; }
+.st-out_for_delivery{ color:#B45309; background:#FEF3C7; }
 .st-delivered{ color:#047857; background:#D1FAE5; }
 .st-cancelled{ color:#B91C1C; background:#FEE2E2; }
 .st-refunded{ color:#9F1239; background:#FFE4E6; }
@@ -662,3 +663,42 @@ table.tbl{ width:100%; border-collapse:collapse; font-size:.85rem; }
 .od-note-form input:focus, .od-note-form select:focus{ outline:2px solid var(--orange); border-color:transparent; }
 .coupon-expired{ color:#B91C1C; font-weight:700; }
 .coupon-scope{ display:inline-block; font-size:.66rem; font-weight:800; letter-spacing:.05em; border:1px solid var(--sand-deep); border-radius:99px; padding:.05rem .4rem; cursor:help; }
+
+/* ══════════ SHIPMENT TRACKING + RETURN/REFUND REQUESTS ══════════ */
+.od-mini-title{ display:block; font-size:.62rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin:.1rem 0 .2rem; }
+.od-ship{ border:1px solid var(--sand); border-radius:12px; padding:.45rem .55rem; background:var(--cream); }
+.od-ship-grid{ display:grid; grid-template-columns:1.05fr 1fr 1.35fr .85fr auto; gap:.4rem; align-items:center; }
+.od-ship-grid input{ padding:.42rem .55rem; border:1.5px solid var(--sand-deep); border-radius:8px; font-size:.78rem; min-width:0; background:#fff; color:var(--ink); }
+.od-ship-grid input:focus{ outline:2px solid var(--orange); border-color:transparent; }
+@media (max-width:1100px){ .od-ship-grid{ grid-template-columns:1fr 1fr; } }
+@media (max-width:640px){ .od-ship-grid{ grid-template-columns:1fr; } }
+
+.od-requests{ display:flex; flex-direction:column; gap:.4rem; }
+.od-req{ border:1px solid var(--sand); border-left:3px solid var(--orange); border-radius:10px; padding:.4rem .55rem; background:#fff; }
+.od-req-head{ display:flex; justify-content:space-between; gap:.5rem; align-items:center; flex-wrap:wrap; }
+.od-req-body{ margin:.3rem 0; font-size:.8rem; line-height:1.5; }
+.od-req-actions{ display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.3rem; }
+.od-req-actions input{ flex:1 1 180px; padding:.4rem .55rem; border:1.5px solid var(--sand-deep); border-radius:8px; font-size:.78rem; min-width:0; }
+.od-req-actions input:focus{ outline:2px solid var(--orange); border-color:transparent; }
+.mini-btn.ok{ border-color:#1f9d55 !important; color:#1a7f4b !important; }
+.mini-btn.ok:hover{ background:#1f9d55 !important; color:#fff !important; }
+
+.req-chip{ display:inline-flex; align-items:center; border-radius:99px; padding:.09rem .55rem; font-size:.62rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; border:1px solid transparent; width:max-content; }
+.req-open{ background:#FDE7D6; color:var(--orange-deep); border-color:#F5C6AC; }
+.req-approved{ background:#E4F6EC; color:#1a7f4b; border-color:#BEE6CF; }
+.req-rejected{ background:#FBE4E1; color:#B91C1C; border-color:#F3C0B8; }
+.req-resolved{ background:var(--sand); color:var(--ink-soft); border-color:var(--sand-deep); }
+.req-count-chip{ text-transform:none; letter-spacing:0; }
+
+.track-line{ display:flex; gap:.45rem; align-items:flex-start; font-size:.78rem; color:var(--ink-soft); background:var(--cream); border:1px solid var(--line); border-radius:12px; padding:.42rem .6rem; margin-top:.4rem; line-height:1.5; }
+.track-line svg{ flex:none; margin-top:.05rem; color:var(--orange-deep); }
+.track-line a{ color:var(--orange-deep); font-weight:700; text-decoration:none; white-space:nowrap; }
+.track-line a:hover{ text-decoration:underline; text-underline-offset:2px; }
+
+.req-box{ margin-top:.45rem; display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; }
+.req-form{ display:flex; flex-direction:column; gap:.45rem; margin-top:.35rem; border:1.5px dashed var(--sand-deep); border-radius:12px; padding:.55rem .6rem; width:100%; box-sizing:border-box; }
+.req-row{ display:flex; gap:.4rem; flex-wrap:wrap; }
+.req-row select{ flex:1 1 140px; padding:.45rem .5rem; border:1.5px solid var(--sand-deep); border-radius:8px; font-size:.8rem; background:#fff; color:var(--ink); }
+.req-form textarea{ padding:.45rem .55rem; border:1.5px solid var(--sand-deep); border-radius:8px; font:inherit; font-size:.82rem; resize:vertical; color:var(--ink); }
+.req-row select:focus,.req-form textarea:focus{ outline:2px solid var(--orange); border-color:transparent; }
+.req-actions{ display:flex; justify-content:flex-end; gap:.4rem; }
